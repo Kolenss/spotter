@@ -68,6 +68,10 @@ def stub_routing(monkeypatch):
     monkeypatch.setattr(services, "geocode", fake_geocode)
     monkeypatch.setattr(services, "route", fake_route)
     monkeypatch.setattr(services, "reverse", fake_reverse)
+    # Overpass too, or every trip built here would make a real 12-second call to
+    # a public server. Defaults to finding nothing, which is the degraded path
+    # the app has to survive anyway; tests that care install their own.
+    monkeypatch.setattr(services, "find_along", lambda *args, **kwargs: ())
     yield geocoded
 
 
@@ -128,6 +132,96 @@ def test_log_segments_tile_each_day_without_gaps(client):
         assert segments[-1]["end_hour"] == pytest.approx(24.0)
         for earlier, later in zip(segments, segments[1:]):
             assert earlier["end_hour"] == pytest.approx(later["start_hour"])
+
+
+# -- Somewhere to actually park ----------------------------------------------
+
+
+def _facility(name: str, route_miles: float) -> dict:
+    return {
+        "osm_id": f"node/{abs(hash(name)) % 10_000}",
+        "kind": "truck_stop",
+        "name": name,
+        "lat": 35.0,
+        "lon": -95.0,
+        "route_miles": route_miles,
+        "detour_miles": 0.4,
+        "amenities": ["shower"],
+    }
+
+
+class _StubFacility:
+    def __init__(self, payload: dict):
+        self._payload = payload
+
+    def as_dict(self) -> dict:
+        return self._payload
+
+
+def _two_per_stop(geometry, stops, total, **kwargs):
+    """One candidate 30 miles back and one 2 miles back, per real stop marker.
+
+    Built from the markers ``services`` actually hands over rather than from
+    fixed numbers, so this also proves the mile markers reaching Overpass are
+    the trip's own.
+    """
+    return tuple(
+        _StubFacility(_facility(f"{label} {marker:.0f}", marker - back))
+        for marker in stops
+        for label, back in (("Early", 30.0), ("Late", 2.0))
+    )
+
+
+def test_each_forced_stop_offers_places_to_park_before_it(client, monkeypatch):
+    """Candidates hang off the stops the regulation forced, nearest one first."""
+    monkeypatch.setattr(services, "find_along", _two_per_stop)
+
+    body = client.post("/api/trips/", PAYLOAD, content_type="application/json").json()
+
+    parkable = [
+        entry
+        for entry in body["timeline"]
+        if entry["kind"] in {"fuel", "break", "reset", "restart"}
+    ]
+    assert parkable, "this trip should force at least one stop"
+
+    offered = [entry for entry in parkable if entry["facilities"]]
+    assert offered, "a forced stop should carry somewhere to park"
+
+    for entry in offered:
+        names = [facility["name"] for facility in entry["facilities"]]
+        # Nearest to the stop first -- that is the one costing the least detour.
+        distances = [facility["miles_before_stop"] for facility in entry["facilities"]]
+        assert distances == sorted(distances)
+        assert all(distance >= 0 for distance in distances), (
+            "a facility past the marker would mean driving past a clock"
+        )
+        assert names
+
+
+def test_the_shipper_and_receiver_are_never_offered_parking(client, monkeypatch):
+    """Pickup and drop-off are addresses the driver was given, not a choice."""
+    monkeypatch.setattr(services, "find_along", _two_per_stop)
+
+    body = client.post("/api/trips/", PAYLOAD, content_type="application/json").json()
+
+    for entry in body["timeline"]:
+        if entry["kind"] in {"pickup", "dropoff", "driving"}:
+            assert entry["facilities"] == []
+
+
+def test_overpass_being_down_still_returns_a_complete_plan(client, monkeypatch):
+    """The degraded path, which is the one that has to survive a hosted demo."""
+    monkeypatch.setattr(services, "find_along", lambda *args, **kwargs: ())
+
+    response = client.post("/api/trips/", PAYLOAD, content_type="application/json")
+    body = response.json()
+
+    assert response.status_code == 201
+    assert body["timeline"]
+    assert all(entry["facilities"] == [] for entry in body["timeline"])
+    for sheet in body["daily_logs"]:
+        assert sheet["total_hours"] == 24.0
 
 
 def test_pickup_and_dropoff_appear_as_on_duty_stops(client):

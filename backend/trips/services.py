@@ -8,9 +8,12 @@ from datetime import datetime
 from django.db import transaction
 
 from hos.planner import Leg, plan_trip
+from hos.rules import DutyStatus
 from routing.client import GeocodingError, Place, RouteLeg, geocode, reverse, route
+from routing.facilities import find_along
 
 from .models import DutyEvent, Trip
+from .stops import PARKABLE_KINDS, stop_kind
 
 __all__ = ["GeocodingError", "build_trip"]
 
@@ -71,6 +74,9 @@ def build_trip(
         carried_in_minutes=round(float(current_cycle_used) * 60),
     )
 
+    geometry = _combined_geometry(to_pickup, to_dropoff)
+    total_miles = round(to_pickup.miles + to_dropoff.miles, 1)
+
     trip = Trip.objects.create(
         current_location=current_location,
         pickup_location=pickup_location,
@@ -86,9 +92,13 @@ def build_trip(
         pickup_lon=pickup.longitude,
         dropoff_lat=dropoff.latitude,
         dropoff_lon=dropoff.longitude,
-        total_distance_miles=round(to_pickup.miles + to_dropoff.miles, 1),
+        total_distance_miles=total_miles,
         total_duration_minutes=to_pickup.duration_minutes + to_dropoff.duration_minutes,
-        route_geometry=_combined_geometry(to_pickup, to_dropoff),
+        route_geometry=geometry,
+        facilities=[
+            facility.as_dict()
+            for facility in find_along(geometry, _parkable_miles(events), total_miles)
+        ],
         distances_estimated=to_pickup.is_estimate or to_dropoff.is_estimate,
         no_road_route=to_pickup.is_unroutable or to_dropoff.is_unroutable,
     )
@@ -108,6 +118,23 @@ def build_trip(
     )
 
     return trip
+
+
+def _parkable_miles(events) -> list[float]:
+    """Route mile marker of every stop the driver has to park the truck for.
+
+    A stop happens where the driving stopped, so its marker is the miles covered
+    so far -- the same quantity the serializer interpolates map positions from,
+    derived the same way so the two cannot disagree about where a rest happened.
+    """
+    markers: list[float] = []
+    travelled = 0.0
+    for event in events:
+        if event.status is DutyStatus.DRIVING:
+            travelled += event.miles
+        elif stop_kind(event.status.value, event.note) in PARKABLE_KINDS:
+            markers.append(travelled)
+    return markers
 
 
 #: A label the client never managed to replace with a place name -- "9.44, 123.32".

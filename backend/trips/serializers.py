@@ -11,9 +11,11 @@ from rest_framework import serializers
 from hos.logsheet import build_log_sheets
 from hos.rules import BREAK_MINUTES, DutyStatus
 from hos.state import DutyEvent as EngineEvent
+from routing.facilities import DEFAULT_LOOKBACK_MILES
 from routing.geometry import cumulative_miles, point_at_fraction, simplify
 
 from .models import Trip
+from .stops import PARKABLE_KINDS, stop_kind as _stop_kind
 
 
 def _latitude():
@@ -94,22 +96,8 @@ def _to_engine_events(trip: Trip) -> list[EngineEvent]:
     ]
 
 
-#: Maps an event's note onto a coarse kind the UI can icon and colour by.
-def _stop_kind(status: str, note: str) -> str:
-    lowered = note.lower()
-    if "pickup" in lowered:
-        return "pickup"
-    if "drop-off" in lowered:
-        return "dropoff"
-    if "fuel" in lowered:
-        return "fuel"
-    if "30-minute break" in lowered:
-        return "break"
-    if "34-hour" in lowered:
-        return "restart"
-    if "10-hour" in lowered:
-        return "reset"
-    return status
+#: Candidates offered under one stop. Five is as many as a driver will read.
+MAX_FACILITIES_PER_STOP = 5
 
 
 class TripSerializer(serializers.ModelSerializer):
@@ -280,6 +268,14 @@ class TripSerializer(serializers.ModelSerializer):
                     "satisfies_break": (
                         not driving and event.minutes >= BREAK_MINUTES and kind != "break"
                     ),
+                    # Where the driver could actually put the truck. Empty for
+                    # driving legs, for the shipper and receiver (both real
+                    # addresses), and whenever Overpass had nothing or was down.
+                    "facilities": (
+                        _facilities_before(trip.facilities, travelled)
+                        if kind in PARKABLE_KINDS
+                        else []
+                    ),
                 }
             )
         return timeline
@@ -313,6 +309,26 @@ class TripSerializer(serializers.ModelSerializer):
             }
             for sheet in self._sheets(trip)
         ]
+
+
+def _facilities_before(facilities: list[dict], stop_miles: float) -> list[dict]:
+    """Stopping places within reach of a stop, nearest to it first.
+
+    Strictly at or before the marker. A facility further along the route would
+    mean driving past the clock that forced the stop, so it is not an option
+    however convenient it looks -- see the note in ``routing.facilities``.
+
+    Each carries how far *before* the stop it sits, because that is the number
+    the driver is actually trading: stop 24 miles early and the whole remaining
+    plan shifts by that much.
+    """
+    within = [
+        {**facility, "miles_before_stop": round(stop_miles - facility["route_miles"], 1)}
+        for facility in facilities or []
+        if 0 <= stop_miles - facility["route_miles"] <= DEFAULT_LOOKBACK_MILES
+    ]
+    within.sort(key=lambda facility: facility["miles_before_stop"])
+    return within[:MAX_FACILITIES_PER_STOP]
 
 
 def _cycle_after_last_restart(events: list[EngineEvent]) -> float:

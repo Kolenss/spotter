@@ -48,6 +48,16 @@ class Trip(models.Model):
     #: the map ships; storing it now means that is a frontend-only change.
     route_geometry = models.JSONField(default=list, blank=True)
 
+    #: Truck stops, rest areas and truck-legal fuel found near the required
+    #: stops, as returned by Overpass at the time the trip was planned.
+    #:
+    #: Persisted rather than derived, unlike the log sheets. A log sheet is a
+    #: pure function of the duty events, so recomputing it can only ever agree
+    #: with them; this is a snapshot of somebody else's database, so re-fetching
+    #: it would silently change an old trip and cost an external call on every
+    #: read of every trip.
+    facilities = models.JSONField(default=list, blank=True)
+
     #: True whenever distances came from the haversine fallback rather than a
     #: road route, for either reason below.
     distances_estimated = models.BooleanField(default=False)
