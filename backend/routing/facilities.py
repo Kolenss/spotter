@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import logging
 import math
+import time
 from bisect import bisect_left, bisect_right
 from dataclasses import dataclass
 from functools import lru_cache
@@ -54,18 +55,49 @@ logger = logging.getLogger(__name__)
 #: it answers a query over Nebraska with ``200 OK`` and zero elements. That is
 #: strictly worse than an error, because it looks exactly like "there is nowhere
 #: to park here" and stops the failover chain before a real server is asked.
+#:
+#: Ordered by what answers *this* query, measured rather than assumed. The
+#: distinction matters: a trivial one-tag probe is answered by mirrors that
+#: cannot manage the real thing, so the order below comes from timing the
+#: actual corridor query this module builds.
+#:
+#:     private.coffee   HTTP 200 in 24.2s, 28 elements
+#:     kumi.systems     HTTP 504 after 39.2s -- accepts, then gives up
+#:     overpass-api.de  ConnectTimeout after 42.1s
+#:
+#: ``overpass-api.de`` is deliberately absent. It is the canonical instance and
+#: the obvious first choice, but while saturated it does not refuse quickly --
+#: it takes forty seconds to fail, spending the whole budget before a working
+#: mirror is even tried. Put it back at the *front* when it recovers; never in
+#: the middle, where its failure delays the servers behind it.
 OVERPASS_URLS = (
-    "https://overpass-api.de/api/interpreter",
+    "https://overpass.private.coffee/api/interpreter",
     "https://overpass.kumi.systems/api/interpreter",
 )
 
 #: Our own socket timeout. Deliberately longer than the QL timeout below so the
 #: server gives up first and answers with an error we can read, rather than us
 #: hanging up on work it is still doing.
-REQUEST_TIMEOUT_SECONDS = 12
+#:
+#: Sized from what the mirrors actually take, not from what feels tolerable.
+#: This was 5s for a while, which is shorter than any mirror's response time --
+#: so every lookup failed, and the failure looked exactly like an outage. A
+#: timeout below the service's real latency does not make the feature fast, it
+#: makes it impossible. The working mirror answers this query in about 24s, so
+#: anything under that returns nothing, every time.
+REQUEST_TIMEOUT_SECONDS = 35
 
-#: Overpass's own budget for the query, in seconds.
-OVERPASS_QL_TIMEOUT = 10
+#: Overpass's own budget for the query, in seconds. Under the socket timeout
+#: above so the server, not us, decides when a query has run too long.
+OVERPASS_QL_TIMEOUT = 30
+
+#: How long to stop asking after every mirror has failed.
+#:
+#: Without this each plan re-pays the full timeout while Overpass is down, and
+#: outages last hours, not seconds. `lru_cache` cannot help: it deliberately
+#: memoises only successes, so a failure is retried in full every time. Short
+#: enough that a recovered service is picked up within a minute.
+FAILURE_BACKOFF_SECONDS = 60
 
 #: How far back from a stop to look. Fifty miles is roughly the distance between
 #: consecutive services on a US interstate, so it nearly always contains at least
@@ -305,6 +337,19 @@ def _build_query(boxes: tuple[tuple[float, float, float, float], ...]) -> str:
     return f"[out:json][timeout:{OVERPASS_QL_TIMEOUT}];\n(\n  {body}\n);\nout center tags;"
 
 
+#: When every mirror last failed, as a monotonic timestamp. Module state rather
+#: than a cache entry because it is about the *service*, not about one query.
+_blocked_until: float = 0.0
+
+
+class OverpassDown(requests.RequestException):
+    """Every mirror failed recently, so we did not ask again."""
+
+
+def overpass_available() -> bool:
+    return time.monotonic() >= _blocked_until
+
+
 @lru_cache(maxsize=64)
 def _fetch(query: str) -> tuple[dict, ...]:
     """POST the query to the first mirror that answers, and return its elements.
@@ -317,7 +362,17 @@ def _fetch(query: str) -> tuple[dict, ...]:
     A mirror that is merely *busy* still counts as an answer for our purposes
     only if it returns parseable JSON; several return an HTML error page with a
     200, which is why the body is parsed here rather than by the caller.
+
+    Once every mirror has failed the next minute of calls return immediately
+    instead of queueing behind the same timeouts. An outage is a property of the
+    service, so the second driver to plan a trip during one should not pay to
+    rediscover it.
     """
+    global _blocked_until
+
+    if not overpass_available():
+        raise OverpassDown("Overpass was unreachable moments ago; not retrying yet")
+
     last_error: Exception | None = None
 
     for url in OVERPASS_URLS:
@@ -339,9 +394,12 @@ def _fetch(query: str) -> tuple[dict, ...]:
             last_error = exc
             continue
 
+        # A mirror answered, so the service is not down whatever it said before.
+        _blocked_until = 0.0
         elements = payload.get("elements") if isinstance(payload, dict) else None
         return tuple(elements or ())
 
+    _blocked_until = time.monotonic() + FAILURE_BACKOFF_SECONDS
     raise last_error or requests.RequestException("no Overpass mirror answered")
 
 

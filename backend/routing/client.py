@@ -21,7 +21,12 @@ import requests
 
 from hos.rules import DEFAULT_SPEED_MPH
 
-from .ors import TruckRoutingUnavailable, configured_key, truck_route
+from .ors import (
+    TruckRoutingUnavailable,
+    configured_key,
+    snap_to_truck_road,
+    truck_route,
+)
 from .trucks import STANDARD_DRY_VAN
 
 logger = logging.getLogger(__name__)
@@ -29,6 +34,12 @@ logger = logging.getLogger(__name__)
 NOMINATIM_SEARCH_URL = "https://nominatim.openstreetmap.org/search"
 NOMINATIM_REVERSE_URL = "https://nominatim.openstreetmap.org/reverse"
 OSRM_URL = "https://router.project-osrm.org/route/v1/driving"
+OSRM_NEAREST_URL = "https://router.project-osrm.org/nearest/v1/driving"
+
+#: Below this, a pin is already on the road for routing purposes and the move
+#: is not worth telling the driver about. Roughly the width of a carriageway
+#: plus its verge, which is the error in dropping a pin on a road by eye.
+SNAP_NOTICE_METRES = 60.0
 
 #: Zoom level for reverse lookups. Nominatim's default of 18 resolves to a
 #: building; Sec. 395.8 wants the town, and a driver dropping a pin on an
@@ -201,6 +212,59 @@ def reverse(latitude: float, longitude: float) -> Place:
         latitude=latitude,
         longitude=longitude,
     )
+
+
+@lru_cache(maxsize=256)
+def snap_to_road(latitude: float, longitude: float) -> tuple[float, float, float]:
+    """Move a point onto the nearest drivable road. Returns (lat, lon, metres).
+
+    A pin dropped by eye lands in a field, a car park or a forest, and the two
+    routing services disagree violently about that. OSRM reaches out kilometres
+    and silently attaches the trip to whatever it finds; OpenRouteService gives
+    up at 350 m and its own ``radiuses`` cannot raise that -- asking for
+    unlimited still answers "the maximum possible radius of 350.0 meters". So a
+    pin a few hundred metres off a road makes the *truck* route fail while the
+    *car* route succeeds, and the trip silently drops to a car profile that
+    never checked a bridge height. Snapping first is what keeps the truck
+    profile reachable.
+
+    Two sources, in order of how much their answer is worth:
+
+    1. **ORS snap on the lorry profile** -- the same network that will do the
+       routing, so anything it returns is routable by definition.
+    2. **OSRM nearest** -- the car network. Used only when the first finds
+       nothing, because it will happily offer a forest track ORS then refuses;
+       still better than leaving the pin in a field, and it rescued a Montana
+       drop-off that ORS could not snap at all.
+
+    Degrades to the point as given, like ``reverse``: the driver has already
+    supplied a usable position, and refusing to plan because a snap lookup
+    failed would be absurd. The caller sees ``0.0`` metres moved and behaves
+    exactly as it did before this existed.
+    """
+    key = configured_key()
+    if key:
+        truck_point = snap_to_truck_road(latitude, longitude, key)
+        if truck_point is not None:
+            return truck_point
+
+    try:
+        response = requests.get(
+            f"{OSRM_NEAREST_URL}/{longitude},{latitude}",
+            params={"number": 1},
+            headers={"User-Agent": USER_AGENT},
+            timeout=REQUEST_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        waypoint = payload["waypoints"][0]
+        snapped_lon, snapped_lat = waypoint["location"]
+        moved = float(waypoint.get("distance", 0.0))
+    except (requests.RequestException, ValueError, KeyError, IndexError) as exc:
+        logger.info("Road snapping unavailable for %s, %s (%s)", latitude, longitude, exc)
+        return latitude, longitude, 0.0
+
+    return float(snapped_lat), float(snapped_lon), moved
 
 
 def route(origin: Place, destination: Place) -> RouteLeg:

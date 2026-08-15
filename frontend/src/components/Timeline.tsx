@@ -1,12 +1,14 @@
+import { useEffect, useState } from "react";
 import {
   CYCLE_LIMIT,
   cycleTier,
   STOP_LABEL,
+  TRUCK_STOP_LABEL,
   type ForcedStop,
   type StopKind,
   type TimelineEntry,
 } from "../types";
-import { TRUCK_STOP_LABEL } from "../truckStops";
+import { isEnRouteLabel, placeAt } from "../stopPlaces";
 
 const KIND_COLOR: Record<string, string> = {
   driving: "var(--driving)",
@@ -104,6 +106,34 @@ export function Timeline({
   onShift,
   shifting = false,
 }: Props) {
+  /* Place names for the rows the engine could only call "en route", keyed by
+     coordinate so a re-render never re-requests one. Filled in after paint;
+     see stopPlaces for why this is not done while planning. */
+  const [places, setPlaces] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    let live = true;
+
+    for (const entry of timeline) {
+      if (!isEnRouteLabel(entry.location)) continue;
+      if (entry.lat === null || entry.lon === null) continue;
+
+      const id = `${entry.lat},${entry.lon}`;
+      void placeAt(entry.lat, entry.lon).then((label) => {
+        // Unmounted, or the driver opened a different trip while these were
+        // still trickling in -- either way this answer is no longer wanted.
+        if (!live || !label) return;
+        setPlaces((current) =>
+          current[id] === label ? current : { ...current, [id]: label },
+        );
+      });
+    }
+
+    return () => {
+      live = false;
+    };
+  }, [timeline]);
+
   const stopCount = timeline.filter((entry) => entry.kind !== "driving").length;
   const totals = runningTotals(timeline, cycleUsedAtStart);
   const tripMiles = totals.length ? totals[totals.length - 1].miles : 0;
@@ -198,8 +228,16 @@ export function Timeline({
                       and on a mid-route leg it read "toward En route to X".
                       Truncated rather than wrapped so rows stay scannable;
                       the full text is on the title. */}
+                  {/* The resolved place wins when we have it: "Davidson
+                      County, Tennessee" is where the driver actually is, and
+                      the engine's own line names the destination instead. The
+                      original stays on the title so the leg it belongs to is
+                      never lost. */}
                   <div className="stop__loc" title={entry.location}>
-                    {entry.location}
+                    {(entry.lat !== null &&
+                      entry.lon !== null &&
+                      places[`${entry.lat},${entry.lon}`]) ||
+                      entry.location}
                   </div>
 
                   {KIND_REASON[entry.kind] && (

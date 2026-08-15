@@ -1,6 +1,18 @@
-import type { TruckStopKind } from "./truckStops";
-
 export type DutyStatus = "off_duty" | "sleeper_berth" | "driving" | "on_duty";
+
+/**
+ * The kinds of place a driver can put a truck, as `routing/facilities.py`
+ * classifies them. Kept in step with `_TAG_QUERIES` and `_KIND_FALLBACK_NAME`
+ * there -- the server decides the kind, this only has to name it.
+ */
+export type TruckStopKind = "truck_stop" | "rest_area" | "fuel" | "parking";
+
+export const TRUCK_STOP_LABEL: Record<TruckStopKind, string> = {
+  truck_stop: "Services",
+  rest_area: "Rest area",
+  fuel: "Truck fuel",
+  parking: "Truck parking",
+};
 
 export type StopKind =
   | "driving"
@@ -77,12 +89,9 @@ export interface TripSummary {
 /**
  * Somewhere the driver could legally put the truck, near a forced stop.
  *
- * Reuses `TruckStopKind` and `TRUCK_STOP_LABEL` from the map layer rather than
- * declaring a second set of names for the same four things — the anti-drift
- * rule the duty-status colours and STOP_LABEL already follow. The two features
- * reach Overpass by different routes (this one server-side and persisted with
- * the trip, the map layer live from the browser) but they are describing the
- * same places and must call them the same thing.
+ * Uses `TruckStopKind` and `TRUCK_STOP_LABEL` above rather than declaring a
+ * second set of names for the same four things — the anti-drift rule the
+ * duty-status colours and STOP_LABEL already follow.
  */
 export interface Facility {
   osm_id: string;

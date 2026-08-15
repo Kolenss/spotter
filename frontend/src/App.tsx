@@ -149,6 +149,26 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
+  /**
+   * Selecting a tab, where "Plan a trip" means *plan a trip* and not merely
+   * "show me the form".
+   *
+   * The results column follows `trip`, not the tab, so opening something from
+   * History and then coming back here used to leave that trip on screen with
+   * the picker map unmounted underneath it -- the form was right there and the
+   * map could not be clicked. Switching to this tab therefore puts the plan
+   * away, exactly as the back link does. The trip is not lost; it is in
+   * History, which is where it was opened from.
+   */
+  function handleTab(next: Tab) {
+    if (next === "plan" && trip) {
+      setTrip(null);
+      setBeforeShift(null);
+      setError(null);
+    }
+    setTab(next);
+  }
+
   /** Move a stop to a chosen truck stop and re-plan everything after it. */
   async function handleShift(stop: ForcedStop) {
     if (!trip) return;
@@ -214,7 +234,7 @@ export default function App() {
 
       <main className="shell page">
         <div className="layout">
-          <div>
+          <div className="layout__side">
             <div className="tabs" role="tablist" aria-label="Trip panel">
               <button
                 type="button"
@@ -223,7 +243,7 @@ export default function App() {
                 className="tab"
                 aria-selected={tab === "plan"}
                 aria-controls="panel-plan"
-                onClick={() => setTab("plan")}
+                onClick={() => handleTab("plan")}
               >
                 Plan a trip
               </button>
@@ -234,7 +254,7 @@ export default function App() {
                 className="tab"
                 aria-selected={tab === "history"}
                 aria-controls="panel-history"
-                onClick={() => setTab("history")}
+                onClick={() => handleTab("history")}
               >
                 History
                 {history.length > 0 && (
@@ -294,6 +314,7 @@ export default function App() {
             </div>
 
             <div
+              className="layout__panel"
               role="tabpanel"
               id="panel-history"
               aria-labelledby="tab-history"
@@ -307,7 +328,7 @@ export default function App() {
             </div>
           </div>
 
-          <div style={{ display: "grid", gap: 20, minWidth: 0 }}>
+          <div className="layout__main">
             {loading && (
               <div className="placeholder">
                 <div>

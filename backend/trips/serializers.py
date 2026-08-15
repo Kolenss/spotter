@@ -175,6 +175,7 @@ class TripSerializer(serializers.ModelSerializer):
             "dropoff_label": trip.dropoff_label,
             "distances_estimated": trip.distances_estimated,
             "truck_routed": trip.truck_routed,
+            "snapped_waypoints": trip.snapped_waypoints or [],
             "truck_spec": STANDARD_DRY_VAN.describe(),
             "no_road_route": trip.no_road_route,
             "path": path,

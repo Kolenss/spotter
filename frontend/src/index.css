@@ -210,6 +210,11 @@ h3 {
 .page {
   padding: 26px 0 72px;
   display: grid;
+  /* `minmax(0, 1fr)`, not the implicit `auto`: an auto column floors at the
+     widest child's min-content, and grid items stretch to the column — so one
+     child that cannot shrink drags every sibling out with it and the page
+     scrolls sideways. Costs nothing where things already fit. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 24px;
 }
 
@@ -217,7 +222,49 @@ h3 {
   display: grid;
   grid-template-columns: 360px minmax(0, 1fr);
   gap: 24px;
-  align-items: start;
+  /* Stretched, not `start`, so History can run the full height of the results
+     beside it instead of stopping short with dead space underneath. */
+  align-items: stretch;
+}
+
+/* The tabs sit on their own row; the active panel takes everything left over.
+   `minmax(0, 1fr)` -- a bare `1fr` floors at min-content, which for a scroll
+   container is its whole scrollHeight, and the row would grow to fit it. */
+.layout__side {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.layout__panel {
+  display: grid;
+  min-height: 0;
+}
+
+/* Author styles always outrank the UA sheet, so the `display: grid` above beat
+   the browser's own `[hidden] { display: none }` and the History panel stayed
+   on screen under the form no matter which tab was selected -- which in turn
+   made the form column 1,387px tall and stretched the picker card beside it to
+   match, leaving ~440px of empty card under the map. Restated here so the
+   attribute keeps working. */
+.layout__panel[hidden] {
+  display: none;
+}
+
+/* The results column: cards stacked from the top at their own heights. The row
+   is stretched so History can run full height beside it, and without this the
+   column's rows inherit that stretch and share the slack out among the cards --
+   which is how a 360px map ended up in an 803px box. */
+.layout__main {
+  display: grid;
+  align-content: start;
+  gap: 20px;
+  min-width: 0;
+}
+
+.layout__panel > .card {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 @media (max-width: 940px) {
@@ -793,12 +840,24 @@ h3 {
 
 /* --- History -------------------------------------------------------------- */
 
-/* Caps at roughly six rows and scrolls. The form above it is the primary task,
-   and a long history would otherwise push it off the top of a laptop screen. */
+/* Fills its column down to the bottom of the results beside it, then scrolls.
+   The height comes from the grid row, so no pixel cap is needed here -- but
+   `min-height` keeps it usable when the results column is short or empty
+   (nothing planned yet), and the flex basis of 0 stops the list's own length
+   from setting the row. */
 .history {
-  max-height: 320px;
+  flex: 1 1 0;
+  min-height: 320px;
   overflow-y: auto;
   padding: 12px;
+}
+
+/* Single column: there is no results column to take the height from, so an
+   uncapped 25-trip list would push the whole page down. */
+@media (max-width: 940px) {
+  .history {
+    max-height: 70vh;
+  }
 }
 
 .history__empty {
@@ -894,10 +953,19 @@ h3 {
 /* Two-up once a column can hold a sheet at a readable scale, one-up below.
    The 680px floor is the real constraint, not a breakpoint: the grid is
    authored 940 units wide, and under ~680px the hour numbers stop being
-   legible. auto-fill lets the browser decide from the space it actually has. */
+   legible. auto-fill lets the browser decide from the space it actually has.
+
+   `min(680px, 100%)` rather than a bare 680px: a bare track minimum is also a
+   *floor on the grid itself*, so on a 375px phone this column stayed 680px
+   wide, and because `.page` is a grid with one auto column, every sibling —
+   the layout, the form, the map, the timeline — stretched to match it. The
+   whole app rendered 680px wide inside a 375px viewport. Below 680px the
+   track now collapses to the container and the sheet scrolls inside
+   `.sheet__gridwrap`, which is what that wrapper is for. Above it nothing
+   changes: 100% is larger, so the 680px floor still wins. */
 .sheets {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(680px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(680px, 100%), 1fr));
   gap: 20px;
   align-items: start;
 }
@@ -1087,11 +1155,14 @@ h3 {
 
 /* --- Location picker ------------------------------------------------------ */
 
+/* Even above and below. With no top padding the chips sat hard against the
+   header's bottom rule while keeping 14px of air under them, so the row read as
+   belonging to the divider rather than sitting between the header and the map. */
 .picker__chips {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 8px;
-  padding: 0 20px 14px;
+  padding: 14px 20px;
 }
 
 .chip {
@@ -1431,6 +1502,118 @@ h3 {
 
   * {
     transition-duration: 0.01ms !important;
+  }
+}
+
+/* --- Phone ----------------------------------------------------------------
+   Everything below is gated on a narrow viewport or a coarse pointer, so the
+   desktop layout above is untouched. These are corrections for what a phone
+   does differently, not a second design.
+   ------------------------------------------------------------------------- */
+
+/* The wheel hint asks for a gesture a touch device does not have, and it sits
+   over the map permanently because `mouseleave` never fires without a mouse.
+   Keyed on the pointer rather than the width: a narrow window on a laptop
+   still has a wheel and still needs the hint. */
+@media (pointer: coarse) {
+  .map__hint {
+    display: none;
+  }
+
+  /* Leaflet ships these at 30px, under the 44px touch minimum. Pinch is the
+     primary gesture on a phone, but the buttons are still the fallback.
+     `.leaflet-bar a.…` rather than the bare class: Leaflet's own rule is
+     `.leaflet-touch .leaflet-bar a`, and anything less specific loses to it. */
+  .leaflet-touch .leaflet-bar a.leaflet-control-zoom-in,
+  .leaflet-touch .leaflet-bar a.leaflet-control-zoom-out {
+    width: 40px;
+    height: 40px;
+    line-height: 38px;
+  }
+}
+
+@media (max-width: 700px) {
+  /* The masthead is two stacked lines here rather than one row, so it keeps
+     the padding it was given for a single baseline and eats a third of the
+     first screen. */
+  .masthead {
+    padding: 16px 0 17px;
+  }
+
+  .masthead h1 {
+    font-size: 20px;
+  }
+
+  /* Title and hint sit at opposite ends of a row that is now too narrow to
+     hold both; let the hint drop under the title instead of squeezing it. */
+  .card__head {
+    flex-wrap: wrap;
+  }
+
+  /* 30px tall, and it is the only way back to the form once a plan is on
+     screen. */
+  .backlink {
+    min-height: 44px;
+    padding-inline: 4px;
+  }
+
+  /* One line each keeps the desktop rail's rows evenly spaced, but at 293px a
+     route reads "Screven County, Georgia → Area C (Bowron Lake…" and the
+     destination — the half that distinguishes one row from the next — is
+     always the half cut off. Two lines fit both ends. */
+  .history__route {
+    white-space: normal;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+  }
+
+  /* The four header fields shrink to fit their own content, so From and To are
+     each too wide to share a line and the header stacks three rows deep — 171px
+     of chrome above a 215px grid, on every one of nine sheets. A two-column
+     grid pairs them by position instead of by width. */
+  .sheet__fields {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px 16px;
+    width: 100%;
+  }
+
+  .sheet__field {
+    min-width: 0;
+  }
+
+  .sheet__head {
+    padding: 12px 14px;
+    gap: 10px;
+  }
+
+  .sheet__foot,
+  .card__head,
+  .card__body,
+  .picker__chips,
+  .picker__help {
+    padding-inline: 14px;
+  }
+}
+
+/* The DOT grid is authored at a fixed 940 units and floors at 720px, so on a
+   phone it can only be read by scrolling `.sheet__gridwrap` sideways — about
+   two and a half screens of it. Nothing said so, and a grid whose right-hand
+   hours are simply absent reads as a broken sheet rather than a scrollable
+   one. Rendered always and hidden here, so its state is measurable. */
+.sheet__swipe {
+  display: none;
+}
+
+@media (max-width: 780px) {
+  .sheet__swipe {
+    display: block;
+    margin: 0;
+    padding: 8px 14px 0;
+    font-size: 12px;
+    color: var(--ink-soft);
   }
 }
 

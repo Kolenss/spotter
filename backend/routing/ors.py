@@ -43,14 +43,66 @@ def configured_key() -> str:
     return os.environ.get(API_KEY_ENV, "").strip()
 
 ORS_DIRECTIONS_URL = "https://api.openrouteservice.org/v2/directions/driving-hgv/geojson"
+ORS_SNAP_URL = "https://api.openrouteservice.org/v2/snap/driving-hgv/json"
 
 REQUEST_TIMEOUT_SECONDS = 15
 
 METRES_PER_MILE = 1609.344
 
+#: How far to look for a road a truck may legally use.
+#:
+#: Directions refuse anything past 350 m and will not be argued with -- their
+#: own ``radiuses`` parameter answers "the maximum possible radius of 350.0
+#: meters" even when asked for unlimited. Snapping has no such cap, so the
+#: point is moved onto the truck network *before* directions ever sees it.
+#: Beyond five kilometres the pin is not really near a road a lorry can use,
+#: and moving it further would be inventing a destination.
+SNAP_RADIUS_METRES = 5000
+
 
 class TruckRoutingUnavailable(RuntimeError):
     """ORS could not answer, so the caller should fall back to OSRM."""
+
+
+def snap_to_truck_road(
+    latitude: float, longitude: float, api_key: str
+) -> tuple[float, float, float] | None:
+    """Nearest point a lorry may legally reach, or None if there isn't one.
+
+    Snapping against the *same* profile that will do the routing is the whole
+    point. A car-network snap is not good enough: OSRM will happily attach a
+    pin to a forest track or a weight-restricted lane, and directions then
+    refuses the very point snapping just produced -- observed on a South
+    Carolina pin that OSRM moved 849 m onto a road ORS would not route from.
+
+    None means no truck-legal road within ``SNAP_RADIUS_METRES``, which is a
+    real answer about the place, not a failure.
+    """
+    try:
+        response = requests.post(
+            ORS_SNAP_URL,
+            json={"locations": [[longitude, latitude]], "radius": SNAP_RADIUS_METRES},
+            headers={"Authorization": api_key, "Content-Type": "application/json"},
+            timeout=REQUEST_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        # A location that could not be snapped comes back as a null entry
+        # rather than being omitted, so the list still lines up with the input.
+        snapped = (payload.get("locations") or [None])[0]
+    except (requests.RequestException, ValueError, KeyError, IndexError) as exc:
+        logger.info("Truck-road snapping unavailable (%s)", exc)
+        return None
+
+    if not snapped:
+        return None
+
+    longitude_out, latitude_out = snapped["location"]
+    return (
+        float(latitude_out),
+        float(longitude_out),
+        float(snapped.get("snapped_distance", 0.0)),
+    )
 
 
 def truck_route(

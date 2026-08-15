@@ -9,7 +9,16 @@ from django.db import transaction
 
 from hos.planner import ForcedStop, Leg, plan_trip
 from hos.rules import DutyStatus
-from routing.client import GeocodingError, Place, RouteLeg, geocode, reverse, route
+from routing.client import (
+    SNAP_NOTICE_METRES,
+    GeocodingError,
+    Place,
+    RouteLeg,
+    geocode,
+    reverse,
+    route,
+    snap_to_road,
+)
 from routing.facilities import find_along
 
 from .models import DutyEvent, Trip
@@ -46,6 +55,14 @@ def build_trip(
     origin = _resolve(current_location, current_lat, current_lon)
     pickup = _resolve(pickup_location, pickup_lat, pickup_lon)
     dropoff = _resolve(dropoff_location, dropoff_lat, dropoff_lon)
+
+    # Onto the road network before anything is routed. A pin a few hundred
+    # metres into a field is refused by the truck profile and quietly accepted
+    # by the car one, which is how a trip ends up flagged "routed on a car
+    # profile" for a reason that has nothing to do with the truck.
+    origin, pickup, dropoff, snapped = _snap_all(
+        ("current", origin), ("pickup", pickup), ("dropoff", dropoff)
+    )
 
     to_pickup = route(origin, pickup)
     to_dropoff = route(pickup, dropoff)
@@ -108,6 +125,7 @@ def build_trip(
         # leg of it was routed for a truck.
         truck_routed=to_pickup.is_truck_legal and to_dropoff.is_truck_legal,
         no_road_route=to_pickup.is_unroutable or to_dropoff.is_unroutable,
+        snapped_waypoints=snapped,
     )
 
     _store_events(trip, events)
@@ -183,6 +201,8 @@ def replan_trip(trip: Trip, forced_stops: list[dict]) -> Trip:
         facilities=trip.facilities,
         forced_stops=forced_stops,
         replanned_from=trip,
+        # Same waypoints, so the same pins were moved to reach them.
+        snapped_waypoints=trip.snapped_waypoints,
         distances_estimated=trip.distances_estimated,
         truck_routed=trip.truck_routed,
         no_road_route=trip.no_road_route,
@@ -223,6 +243,34 @@ def _parkable_miles(events) -> list[float]:
         elif stop_kind(event.status.value, event.note) in PARKABLE_KINDS:
             markers.append(travelled)
     return markers
+
+
+def _snap_all(*waypoints: tuple[str, Place]) -> tuple:
+    """Snap every waypoint to the road network, reporting the ones that moved.
+
+    Returns the places in the order given, followed by the list of moves worth
+    showing the driver. A failed lookup returns the point unchanged and reports
+    nothing, so this can only ever improve on doing nothing.
+    """
+    places: list[Place] = []
+    moves: list[dict] = []
+
+    for field, place in waypoints:
+        latitude, longitude, metres = snap_to_road(place.latitude, place.longitude)
+        places.append(
+            Place(
+                query=place.query,
+                label=place.label,
+                latitude=latitude,
+                longitude=longitude,
+            )
+        )
+        if metres >= SNAP_NOTICE_METRES:
+            moves.append(
+                {"field": field, "label": place.label, "metres": round(metres)}
+            )
+
+    return (*places, moves)
 
 
 #: A label the client never managed to replace with a place name -- "9.44, 123.32".

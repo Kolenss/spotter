@@ -68,6 +68,11 @@ def stub_routing(monkeypatch):
     monkeypatch.setattr(services, "geocode", fake_geocode)
     monkeypatch.setattr(services, "route", fake_route)
     monkeypatch.setattr(services, "reverse", fake_reverse)
+    # Road snapping too. Every waypoint goes through it now, so without this
+    # each trip built here would make three live OSRM calls -- and the stubbed
+    # coordinates above would silently move, changing the mileage the rest of
+    # these tests assert on. Default: already on a road, nothing moved.
+    monkeypatch.setattr(services, "snap_to_road", lambda lat, lon: (lat, lon, 0.0))
     # Overpass too, or every trip built here would make a real 12-second call to
     # a public server. Defaults to finding nothing, which is the degraded path
     # the app has to survive anyway; tests that care install their own.
@@ -646,3 +651,49 @@ def test_a_pinned_location_still_needs_its_label(client):
     }
 
     assert client.post("/api/trips/", payload, content_type="application/json").status_code == 400
+
+
+# -- Getting the pin onto a road ---------------------------------------------
+
+
+def test_a_waypoint_off_the_road_network_is_snapped_and_reported(client, monkeypatch):
+    """A pin in a field makes the truck profile refuse and the car one accept,
+    which is how a trip silently loses its truck routing."""
+    def fake_snap(latitude: float, longitude: float):
+        # Only the drop-off is off-road, by four kilometres.
+        if round(latitude, 2) == 41.88:
+            return 41.9, -87.6, 3866.0
+        return latitude, longitude, 4.0
+
+    monkeypatch.setattr(services, "snap_to_road", fake_snap)
+    payload = {**PAYLOAD, "dropoff_lat": 41.8781, "dropoff_lon": -87.6298}
+
+    body = client.post("/api/trips/", payload, content_type="application/json").json()
+    moved = body["route"]["snapped_waypoints"]
+
+    assert [entry["field"] for entry in moved] == ["dropoff"], (
+        "only the waypoint that actually moved should be reported"
+    )
+    assert moved[0]["metres"] == 3866
+
+    dropoff = next(w for w in body["route"]["waypoints"] if w["kind"] == "dropoff")
+    assert dropoff["lat"] == pytest.approx(41.9), "the trip must use the snapped point"
+
+
+def test_a_pin_already_on_a_road_is_not_reported_as_moved(client, monkeypatch):
+    """Every pin is snapped; only a move worth mentioning is mentioned."""
+    monkeypatch.setattr(services, "snap_to_road", lambda lat, lon: (lat, lon, 4.0))
+
+    body = client.post("/api/trips/", PAYLOAD, content_type="application/json").json()
+
+    assert body["route"]["snapped_waypoints"] == []
+
+
+def test_a_failed_snap_leaves_the_trip_exactly_as_it_was(client, monkeypatch):
+    """OSRM being down must not cost the driver their trip."""
+    monkeypatch.setattr(services, "snap_to_road", lambda lat, lon: (lat, lon, 0.0))
+
+    response = client.post("/api/trips/", PAYLOAD, content_type="application/json")
+
+    assert response.status_code == 201
+    assert response.json()["route"]["snapped_waypoints"] == []

@@ -95,6 +95,17 @@ class Trip(models.Model):
     #: separate because retrying fixes one and never fixes the other.
     no_road_route = models.BooleanField(default=False)
 
+    #: Waypoints moved onto the nearest road before routing, as
+    #: [{"field": "dropoff", "label": .., "metres": ..}]. Only ones moved far
+    #: enough to be worth mentioning appear here.
+    #:
+    #: Recorded rather than silently applied because this relocates the
+    #: driver's own choice, sometimes by kilometres -- the same reason a
+    #: half-supplied coordinate pair is a 400 rather than a guess. A drop-off
+    #: that moved four kilometres onto a forest track is something the driver
+    #: needs to see, not a detail to bury.
+    snapped_waypoints = models.JSONField(default=list, blank=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

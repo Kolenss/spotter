@@ -87,6 +87,11 @@ export function LogSheet({ log, trip, index, total }: Props) {
         </dl>
       </header>
 
+      {/* Shown only where the grid no longer fits — see `.sheet__swipe`. The
+          sheet is drawn at a fixed width and cannot reflow, so on a phone the
+          later hours are reachable only by scrolling the wrapper sideways. */}
+      <p className="sheet__swipe">Scroll the grid sideways for the full 24 hours.</p>
+
       <div className="sheet__gridwrap">
         <LogSheetGrid log={log} />
       </div>

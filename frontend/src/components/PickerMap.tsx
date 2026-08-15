@@ -1,12 +1,10 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { MapContainer, Marker, TileLayer, Tooltip, useMapEvents } from "react-leaflet";
 import L, { type LatLngBoundsExpression } from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { reverseGeocode } from "../api";
 import type { LocationKey, PlaceSuggestion } from "../types";
-import type { TruckStop } from "../truckStops";
 import { MapFrame } from "./MapFrame";
-import { TruckStopLayer, type LayerStatus } from "./TruckStopLayer";
 
 /* Same palette as the route map, so a pickup pin is the same amber before and
    after the trip is planned. Leaflet writes these through its own JS rather
@@ -68,27 +66,8 @@ interface Props {
   onResolved: (key: LocationKey, place: PlaceSuggestion) => void;
 }
 
-const STATUS_HINT: Record<LayerStatus, string | null> = {
-  off: null,
-  idle: null,
-  loading: "Finding truck stops…",
-  zoomed_out: "Zoom in to see truck stops",
-  busy: "Truck stop service busy — try again shortly",
-  empty: "No truck stops in view",
-  named_only: "Showing named stops — zoom in for all",
-};
-
 export function PickerMap({ picked, active, onActiveChange, onResolved }: Props) {
   const [resolving, setResolving] = useState<LocationKey | null>(null);
-  const [showStops, setShowStops] = useState(false);
-  const [stopStatus, setStopStatus] = useState<LayerStatus>("off");
-
-  // Stable identity: the layer takes this as an effect dependency, and a fresh
-  // function each render would restart the fetch on every parent update.
-  const handleStopStatus = useCallback(
-    (status: LayerStatus) => setStopStatus(status),
-    [],
-  );
 
   /* Identifies the newest lookup per field. Nominatim takes about a second, so
      a driver correcting a misplaced pin can easily have two in flight; without
@@ -153,25 +132,6 @@ export function PickerMap({ picked, active, onActiveChange, onResolved }: Props)
     if (next) onActiveChange(next.key);
   }
 
-  /**
-   * A named stop keeps its own name -- "Love's Travel Stop" is what a driver
-   * would write in the Remarks column, and it is more use than the town it
-   * happens to sit in. An unnamed one would only give "Truck parking", so that
-   * falls through to the normal reverse lookup and gets a city instead.
-   */
-  function handleStopPick(stop: TruckStop) {
-    if (stop.named) {
-      onResolved(active, { label: stop.label, lat: stop.lat, lon: stop.lon });
-    } else {
-      place(active, stop.lat, stop.lon);
-    }
-
-    const next = FIELDS.find(
-      (field) => field.key !== active && picked[field.key] === undefined,
-    );
-    if (next) onActiveChange(next.key);
-  }
-
   const activeLabel = useMemo(
     () => FIELDS.find((field) => field.key === active)?.short ?? "",
     [active],
@@ -181,20 +141,9 @@ export function PickerMap({ picked, active, onActiveChange, onResolved }: Props)
     <div className="card">
       <div className="card__head">
         <span className="card__title">Pick locations on the map</span>
-        <div className="picker__tools">
-          <span className="card__hint">
-            {STATUS_HINT[stopStatus] ??
-              (resolving ? "Naming that spot…" : `Click to set ${activeLabel}`)}
-          </span>
-          <button
-            type="button"
-            className={`toggle${showStops ? " toggle--on" : ""}`}
-            aria-pressed={showStops}
-            onClick={() => setShowStops((current) => !current)}
-          >
-            Truck stops
-          </button>
-        </div>
+        <span className="card__hint">
+          {resolving ? "Naming that spot…" : `Click to set ${activeLabel}`}
+        </span>
       </div>
 
       <div className="picker__chips" role="tablist" aria-label="Location being set">
@@ -233,8 +182,8 @@ export function PickerMap({ picked, active, onActiveChange, onResolved }: Props)
           center={DEFAULT_CENTER}
           zoom={DEFAULT_ZOOM}
           /* Leaflet's default floor is 0, which draws four copies of the world
-             side by side with grey above and below -- a view you cannot pick a
-             truck stop from, or anything else. 3 shows a continent. */
+             side by side with grey above and below -- a view you cannot pick
+             anything out of. 3 shows a continent. */
           minZoom={3}
           scrollWheelZoom
           className="map"
@@ -247,11 +196,6 @@ export function PickerMap({ picked, active, onActiveChange, onResolved }: Props)
           />
           <MapFrame bounds={bounds} fitKey={fitKey} />
           <ClickToPin onPick={handleMapClick} />
-          <TruckStopLayer
-            enabled={showStops}
-            onStatus={handleStopStatus}
-            onPick={handleStopPick}
-          />
 
           {pins.map((pin) => (
             <Marker
