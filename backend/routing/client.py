@@ -21,6 +21,9 @@ import requests
 
 from hos.rules import DEFAULT_SPEED_MPH
 
+from .ors import TruckRoutingUnavailable, configured_key, truck_route
+from .trucks import STANDARD_DRY_VAN
+
 logger = logging.getLogger(__name__)
 
 NOMINATIM_SEARCH_URL = "https://nominatim.openstreetmap.org/search"
@@ -63,14 +66,25 @@ class RouteLeg:
     duration_minutes: int
     #: GeoJSON [lon, lat] pairs. Stored now, drawn when the map ships.
     geometry: list[list[float]] = field(default_factory=list)
-    #: "osrm" for a real road route; "estimate" when the service failed us;
-    #: "no-route" when it answered correctly that no drivable path exists.
+    #: "ors" for a truck-legal route; "osrm" for a car road route; "estimate"
+    #: when the service failed us; "no-route" when it answered correctly that
+    #: no drivable path exists.
     source: str = "osrm"
 
     @property
     def is_estimate(self) -> bool:
         """True for either fallback -- the mileage is approximate both ways."""
         return self.source in ("estimate", "no-route")
+
+    @property
+    def is_truck_legal(self) -> bool:
+        """True when a truck profile produced this, restrictions and all.
+
+        False means the mileage came from a car profile or a straight line, and
+        the route may cross something an 80,000 lb combination cannot legally
+        or physically use. Surfaced to the driver rather than hidden.
+        """
+        return self.source == "ors"
 
     @property
     def is_unroutable(self) -> bool:
@@ -190,7 +204,25 @@ def reverse(latitude: float, longitude: float) -> Place:
 
 
 def route(origin: Place, destination: Place) -> RouteLeg:
-    """Road route between two places, falling back to a straight-line estimate."""
+    """Best available route between two places.
+
+    Three tiers, each a strictly worse but still usable answer than the last:
+
+    1. **OpenRouteService ``driving-hgv``** -- a truck-legal route that honours
+       height, weight, length and axle load. Only when a key is configured.
+    2. **OSRM** -- a car route. Right roads, wrong vehicle: it does not know
+       about low bridges or lorry bans, so the mileage is plausible and the
+       route may not be drivable by a truck.
+    3. **Haversine** -- a straight line with a winding factor.
+
+    A demo that shows approximate mileage beats a demo that 500s, and that logic
+    extends upwards: a car route beats no route, and is flagged as such rather
+    than passed off as truck-legal.
+    """
+    truck = _truck_route(origin, destination)
+    if truck is not None:
+        return truck
+
     coords = (
         f"{origin.longitude},{origin.latitude};"
         f"{destination.longitude},{destination.latitude}"
@@ -237,6 +269,43 @@ def route(origin: Place, destination: Place) -> RouteLeg:
         duration_minutes=minutes,
         geometry=geometry,
         source="osrm",
+    )
+
+
+def _truck_route(origin: Place, destination: Place) -> RouteLeg | None:
+    """A truck-legal route, or ``None`` to mean "fall through to OSRM".
+
+    The key comes from the environment rather than Django settings on purpose:
+    every other module in ``routing/`` is free of Django imports, which is what
+    lets this layer be exercised as a plain library. ``load_dotenv()`` in
+    settings.py has already put ``.env`` into ``os.environ`` by the time any
+    request arrives, so reading it here sees the same value.
+    """
+    api_key = configured_key()
+    if not api_key:
+        return None
+
+    try:
+        miles, minutes, geometry = truck_route(
+            origin.longitude,
+            origin.latitude,
+            destination.longitude,
+            destination.latitude,
+            STANDARD_DRY_VAN,
+            api_key,
+        )
+    except TruckRoutingUnavailable as exc:
+        logger.warning(
+            "Truck routing unavailable for %s -> %s (%s); falling back to the "
+            "car profile, which does not know about bridge heights.",
+            origin.label,
+            destination.label,
+            exc,
+        )
+        return None
+
+    return RouteLeg(
+        miles=miles, duration_minutes=minutes, geometry=geometry, source="ors"
     )
 
 

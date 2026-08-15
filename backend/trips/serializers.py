@@ -13,6 +13,7 @@ from hos.rules import BREAK_MINUTES, DutyStatus
 from hos.state import DutyEvent as EngineEvent
 from routing.facilities import DEFAULT_LOOKBACK_MILES
 from routing.geometry import cumulative_miles, point_at_fraction, simplify
+from routing.trucks import STANDARD_DRY_VAN
 
 from .models import Trip
 from .stops import PARKABLE_KINDS, stop_kind as _stop_kind
@@ -159,6 +160,8 @@ class TripSerializer(serializers.ModelSerializer):
             "pickup_label": trip.pickup_label,
             "dropoff_label": trip.dropoff_label,
             "distances_estimated": trip.distances_estimated,
+            "truck_routed": trip.truck_routed,
+            "truck_spec": STANDARD_DRY_VAN.describe(),
             "no_road_route": trip.no_road_route,
             "path": path,
             "waypoints": [

@@ -62,6 +62,13 @@ class Trip(models.Model):
     #: road route, for either reason below.
     distances_estimated = models.BooleanField(default=False)
 
+    #: True when a truck profile produced this route, honouring height, weight,
+    #: length and axle load. False means it came from a car profile or a
+    #: straight line and may cross a low bridge or a road that bans lorries.
+    #: Stored per trip because it depends on whether a key was configured when
+    #: the trip was planned, which can change between one trip and the next.
+    truck_routed = models.BooleanField(default=False)
+
     #: True when the routing service answered that no drivable road path exists
     #: between the waypoints -- a disconnected road graph, not an outage. Kept
     #: separate because retrying fixes one and never fixes the other.

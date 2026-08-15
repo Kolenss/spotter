@@ -100,6 +100,9 @@ def build_trip(
             for facility in find_along(geometry, _parkable_miles(events), total_miles)
         ],
         distances_estimated=to_pickup.is_estimate or to_dropoff.is_estimate,
+        # Both legs, not either: a trip is only truck-legal end to end if every
+        # leg of it was routed for a truck.
+        truck_routed=to_pickup.is_truck_legal and to_dropoff.is_truck_legal,
         no_road_route=to_pickup.is_unroutable or to_dropoff.is_unroutable,
     )
 

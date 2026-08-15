@@ -188,6 +188,14 @@ export default function App() {
                     <li>1 hour on duty at pickup and at drop-off.</li>
                     <li>Fuel stop every 1,000 miles, 30 minutes, logged on duty.</li>
                     <li>Required rests taken as 10 consecutive hours.</li>
+                    {/* An assumption, not a fifth input: these are the US
+                        federal maxima, so a real truck is almost always
+                        smaller — and a route legal for the maximum is legal
+                        for anything under it. */}
+                    <li>
+                        Standard 53&nbsp;ft dry van: 13&prime;6&Prime; high,
+                        80,000&nbsp;lb, 5 axles, non-hazmat.
+                    </li>
                     <li>Times shown in the home terminal&rsquo;s time zone.</li>
                   </ul>
                 </div>
@@ -272,6 +280,20 @@ export default function App() {
                         is still calculated exactly.
                       </>
                     )}
+                  </div>
+                )}
+
+                {/* Said out loud rather than left to be assumed. A car route
+                    is right about roads and wrong about vehicles: it does not
+                    know a bridge is 12'4" or that a parkway bans lorries. The
+                    schedule is exact either way — it is the road choice that
+                    is unverified, and only the driver can judge that. */}
+                {!trip.route.truck_routed && !trip.route.distances_estimated && (
+                  <div className="alert alert--warn" role="status">
+                    Routed on a <strong>car</strong> profile — bridge heights,
+                    weight limits and lorry bans were not checked. Verify the
+                    route before running it. The hours-of-service schedule is
+                    calculated exactly regardless.
                   </div>
                 )}
 

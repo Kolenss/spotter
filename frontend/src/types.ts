@@ -45,6 +45,12 @@ export interface RouteInfo {
   dropoff_label: string;
   /** True whenever mileage is a straight-line estimate rather than a road route. */
   distances_estimated: boolean;
+  /** True when a truck profile produced this route, honouring height, weight,
+   *  length and axle load. False means a car profile drew it and it may cross
+   *  a low bridge or a road that bans lorries. */
+  truck_routed: boolean;
+  /** The vehicle the trip was planned for, in a driver's own units. */
+  truck_spec: string;
   /** True when no drivable road path exists between the waypoints, as opposed
    *  to the routing service simply being down. Retrying will not help. */
   no_road_route: boolean;
