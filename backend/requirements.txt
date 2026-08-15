@@ -11,6 +11,10 @@ dj-database-url==3.0.1
 psycopg[binary]==3.2.10
 python-dotenv==1.1.1
 
+# Production WSGI server. `manage.py runserver` is single-threaded and
+# explicitly not for deployment; Render runs this instead.
+gunicorn==23.0.0
+
 # Development / test
 pytest==9.1.1
 pytest-django==4.14.0
