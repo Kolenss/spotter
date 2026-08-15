@@ -1,0 +1,1349 @@
+/* ==========================================================================
+   Spotter — design tokens and base styles
+   A compliance tool: precise, legible, unfussy. Numbers are tabular
+   everywhere so columns of hours line up the way they do on a real log.
+
+   Palette and type are taken from spotter.ai (computed styles read off the
+   live site, 2026-08-14). Their display face is Matter, licensed from
+   Displaay — Satoshi (Fontshare, free for commercial use) stands in for it.
+   DM Sans is the face they actually use for UI and is OFL.
+
+   Two deliberate departures from their site, both for contrast:
+     · Buttons set their label in navy on the turquoise gradient. Spotter uses
+       white, which measures ~2.5:1 and fails WCAG AA.
+     · --accent is decorative only (borders, dots, gradients, glow). Turquoise
+       is ~1.7:1 on white, so anything that has to be *read* on a light
+       surface uses --accent-ink instead.
+   ========================================================================== */
+
+:root {
+  /* Neutrals are spotter.ai's own ramp, which is the Chakra UI gray scale. */
+  --bg: #f7fafc;
+  --surface: #ffffff;
+  --surface-sunken: #edf2f7;
+  --ink: #1a202c;
+  --ink-soft: #4a5568;
+  /* gray.500. Every label in this app sits between 10.5px and 13.5px, and at
+     those sizes #718096 lands at 4.0:1 — under AA. So it is a rule colour and
+     a hairline colour here, never a text colour; secondary text uses
+     --ink-soft instead. */
+  --ink-muted: #718096;
+  --border: #e2e8f0;
+  --border-strong: #cbd5e0;
+
+  --navy: #0d1e2d;
+
+  --accent: #40e0d0;
+  --accent-dark: #20b2aa;
+  --accent-ink: #0f766e;
+  --accent-wash: #e6fffa;
+  --accent-line: rgb(64 224 208 / 0.2);
+
+  --danger: #dc2e4e;
+  --danger-wash: #fff1f3;
+  --warn: #b45309;
+  --warn-wash: #fffbeb;
+
+  /* The four duty statuses. These are the only colours allowed on the grid,
+     and they carry the same meaning in the legend, the stop list and the
+     totals column. Deliberately left outside the brand palette: they encode
+     regulation and need four-way discriminability more than they need to
+     match the accent. */
+  --off-duty: #64748b;
+  --sleeper-berth: #7c3aed;
+  --driving: #059669;
+  --on-duty: #d97706;
+
+  /* How much of the 70-hour cycle is gone, green through red. Deliberately
+     *not* the duty-status colours above: those four mean "which line of the
+     grid", and reusing the driving green for "plenty of cycle left" would make
+     the same green mean two unrelated things on one screen. Thresholds and the
+     tier names live in `cycleTier()` in types.ts so the meter and the timeline
+     cannot drift apart. Yellow is darkened to #a16207 because it is used as
+     text at 11.5px, where #eab308 falls below AA contrast on white. */
+  --cycle-ok: #059669;
+  --cycle-warn: #a16207;
+  --cycle-high: #ea580c;
+  --cycle-full: #dc2e4e;
+
+  /* Route map height. The trip timeline sits beside it and derives its own
+     scroll height from this, so the two stay level. */
+  --map-h: 420px;
+
+  --radius: 8px;
+  --radius-lg: 16px;
+  --shadow-sm: 0 1px 2px rgb(26 32 44 / 0.06);
+  --shadow: 0 1px 3px rgb(26 32 44 / 0.08), 0 8px 24px -12px rgb(26 32 44 / 0.18);
+  /* Their signature: a teal halo with a coral undertone, so the primary
+     action reads as lit rather than raised. */
+  --glow: 0 8px 32px rgb(0 128 128 / 0.4), 0 4px 16px rgb(248 73 96 / 0.3);
+
+  --grad-hero: linear-gradient(135deg, #0f2027 0%, #203a43 50%, #2c5364 100%);
+  --grad-accent: linear-gradient(135deg, #40e0d0, #20b2aa);
+
+  --font-display: "Satoshi", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font: "DM Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+
+  color-scheme: light;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font);
+  font-size: 15px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Spotter splits its two faces strictly by role: the display face carries the
+   headings and the figures you read at a glance, DM Sans carries everything
+   that behaves like UI. */
+h1,
+h2,
+h3 {
+  margin: 0;
+  font-family: var(--font-display);
+  line-height: 1.25;
+  letter-spacing: -0.02em;
+}
+
+/* Hours, miles and times are compared column-to-column constantly here. */
+.num {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- Layout --------------------------------------------------------------- */
+
+.masthead {
+  background: var(--grad-hero);
+  color: #e2e8f0;
+  padding: 22px 0 24px;
+}
+
+.shell {
+  width: min(1180px, 100% - 40px);
+  margin-inline: auto;
+}
+
+/* On a large display the page keeps its 1180px reading width, but the log
+   sheets do not: two DOT grids side by side need about 1400px between them,
+   and below that they would be shrunk past legibility. So the sheets alone
+   break out, up to 1560px. */
+@media (min-width: 1460px) {
+  .logs {
+    /* 56px of gutter, not 40: 100vw counts the scrollbar, so a tighter figure
+       overflows by exactly its width. */
+    --logs-w: min(1560px, 100vw - 56px);
+    width: var(--logs-w);
+    /* Negative margins, not `margin-inline: auto` -- auto computes to 0 once a
+       block is wider than its containing block, which pins it to the left edge
+       and spills off the right. This splits the excess evenly instead. */
+    margin-inline: calc((100% - var(--logs-w)) / 2);
+  }
+}
+
+/* Brand left, regulation right, on one baseline. Stacked at the top left they
+   left the whole right half of a wide display empty, so the bar read as a
+   stray strip rather than a header. Wrapping restores the stack once the two
+   no longer fit side by side. */
+.masthead__bar {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px 32px;
+  flex-wrap: wrap;
+}
+
+.masthead__brand {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.masthead h1 {
+  font-size: 22px;
+  font-weight: 650;
+  color: #f8fafc;
+}
+
+/* The hero gradient runs to #2c5364 at its lightest, so both secondary lines
+   are measured against that end rather than the dark one. */
+.masthead__sub {
+  font-size: 13.5px;
+  color: #cbd5e0;
+}
+
+/* Turquoise is only ever text on a dark ground — this is the one place in the
+   app that qualifies, and it's where their site puts it too. */
+/* No text-align and no breakpoint: `space-between` puts this at the right edge
+   while it shares the row, and a shrink-to-fit flex item alone on a wrapped
+   line starts at the left on its own. The row-gap below is what separates the
+   two once they stack, so the spacing is the same wherever the wrap lands. */
+.masthead__reg {
+  font-size: 12.5px;
+  color: #b8c6d2;
+}
+
+.masthead__reg strong {
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.page {
+  padding: 26px 0 72px;
+  display: grid;
+  gap: 24px;
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: 360px minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+
+@media (max-width: 940px) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* --- Cards ---------------------------------------------------------------- */
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+}
+
+.card__head {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.card__title {
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.card__hint {
+  font-size: 12.5px;
+  color: var(--ink-soft);
+}
+
+.card__body {
+  padding: 20px;
+}
+
+/* --- Form ----------------------------------------------------------------- */
+
+.field {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+
+.field__label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+.field__note {
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.field input {
+  width: 100%;
+  padding: 10px 12px;
+  font: inherit;
+  font-size: 14.5px;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+/* Turquoise is light, so the ring needs more opacity than a blue one would to
+   register at all. */
+.field input:focus {
+  outline: none;
+  border-color: var(--accent-dark);
+  box-shadow: 0 0 0 3px rgb(64 224 208 / 0.35);
+}
+
+.field input[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+.field input[aria-invalid="true"]:focus {
+  box-shadow: 0 0 0 3px rgb(220 38 38 / 0.14);
+}
+
+.field__error {
+  font-size: 12.5px;
+  color: var(--danger);
+}
+
+/* Navy on turquoise, not white on turquoise. Spotter's own buttons measure
+   about 2.5:1; this is ~8:1 and reads sharper besides. */
+.btn {
+  width: 100%;
+  padding: 11px 16px;
+  font: inherit;
+  font-size: 14.5px;
+  font-weight: 700;
+  color: var(--navy);
+  background: var(--grad-accent);
+  border: none;
+  border-radius: var(--radius);
+  box-shadow: var(--glow);
+  cursor: pointer;
+  transition: filter 0.15s, box-shadow 0.15s, transform 0.05s;
+}
+
+.btn:hover:not(:disabled) {
+  filter: brightness(1.06);
+  box-shadow: 0 10px 38px rgb(0 128 128 / 0.5), 0 4px 16px rgb(248 73 96 / 0.35);
+}
+
+.btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.btn:disabled {
+  color: var(--surface);
+  background: var(--ink-muted);
+  box-shadow: none;
+  cursor: progress;
+}
+
+/* Segmented control over the form column. The two panels are alternatives,
+   not a hierarchy, so neither is styled as the primary action. */
+.tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 16px;
+  padding: 4px;
+  background: var(--surface-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.tab {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 9px 12px;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 650;
+  color: var(--ink-soft);
+  background: none;
+  border: 0;
+  border-radius: calc(var(--radius) - 3px);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.tab:hover[aria-selected="false"] {
+  color: var(--ink);
+}
+
+.tab[aria-selected="true"] {
+  color: var(--ink);
+  background: var(--surface);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.12);
+}
+
+.tab:focus-visible {
+  outline: 2px solid var(--accent-dark);
+  outline-offset: -2px;
+}
+
+.tab__count {
+  padding: 1px 7px;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--ink-soft);
+  background: var(--surface-sunken);
+  border-radius: 999px;
+}
+
+.tab[aria-selected="true"] .tab__count {
+  color: var(--navy);
+  background: var(--accent-wash);
+}
+
+/* Sits above the results, so it reads as leaving them rather than as an
+   action on the trip -- hence a link, not a filled button. */
+.backlink {
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: -6px;
+  padding: 4px 2px;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 650;
+  color: var(--accent-dark);
+  background: none;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.backlink:hover {
+  text-decoration: underline;
+}
+
+.backlink:focus-visible {
+  outline: 2px solid var(--accent-dark);
+  outline-offset: 2px;
+}
+
+.alert {
+  margin-bottom: 16px;
+  padding: 11px 13px;
+  border-radius: var(--radius);
+  font-size: 13.5px;
+  background: var(--danger-wash);
+  border: 1px solid #f9c3cc;
+  color: #9f1239;
+}
+
+.alert--warn {
+  background: var(--warn-wash);
+  border-color: #fde68a;
+  color: #92400e;
+}
+
+/* --- Stats ---------------------------------------------------------------- */
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 1px;
+  background: var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+
+.stat {
+  background: var(--surface);
+  padding: 15px 18px;
+}
+
+.stat__label {
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.045em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.stat__value {
+  margin-top: 3px;
+  font-family: var(--font-display);
+  font-size: 23px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.stat__unit {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink-soft);
+  margin-left: 3px;
+}
+
+.stat__foot {
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+/* --- Cycle meter ---------------------------------------------------------- */
+
+.meter {
+  margin-top: 8px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--border);
+  overflow: hidden;
+}
+
+.meter__fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--cycle-ok);
+  transition: width 0.4s ease, background-color 0.4s ease;
+}
+
+.meter__fill--warn {
+  background: var(--cycle-warn);
+}
+
+.meter__fill--high {
+  background: var(--cycle-high);
+}
+
+.meter__fill--full {
+  background: var(--cycle-full);
+}
+
+/* The same four tiers as text, for the figures that sit next to the meter. */
+.cycle--ok {
+  color: var(--cycle-ok);
+}
+
+.cycle--warn {
+  color: var(--cycle-warn);
+}
+
+.cycle--high {
+  color: var(--cycle-high);
+}
+
+.cycle--full {
+  color: var(--cycle-full);
+}
+
+/* --- Stop list ------------------------------------------------------------ */
+
+.stops {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* Two columns, not three. The rail is 320px wide; a third column for the date
+   and duration left barely 128px for the text and broke place names across
+   four lines. Time and duration are inlined into the body instead. */
+.stop {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr);
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px dashed var(--border);
+}
+
+.stop__body {
+  min-width: 0; /* lets the children actually shrink and ellipsis */
+  display: grid;
+  gap: 2px;
+}
+
+.stop__top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.stop:last-child {
+  border-bottom: none;
+}
+
+.stop__rail {
+  position: relative;
+  display: flex;
+  justify-content: center;
+}
+
+.stop__dot {
+  width: 11px;
+  height: 11px;
+  margin-top: 5px;
+  border-radius: 50%;
+  border: 2px solid var(--surface);
+  box-shadow: 0 0 0 1.5px currentColor;
+  background: currentColor;
+}
+
+/* Driving legs are the connective tissue between stops, not events in their
+   own right — a rail rather than a marker, and visually recessive so the
+   stops stay the thing you scan for. */
+.stop--driving {
+  border-bottom: none;
+  padding: 9px 0;
+}
+
+.stop--driving .stop__label,
+.stop--driving .stop__loc,
+.stop--driving .stop__when,
+.stop--driving .stop__dur {
+  color: var(--ink-soft);
+  font-weight: 500;
+}
+
+.stop--driving .stop__label {
+  font-size: 13.5px;
+}
+
+.stop__line {
+  width: 3px;
+  margin: 2px 0;
+  border-radius: 2px;
+  background: currentColor;
+  opacity: 0.45;
+}
+
+.stop__label {
+  font-weight: 600;
+  font-size: 14px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stop__when {
+  font-size: 12.5px;
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+
+/* Cumulative miles and driving hours, on driving rows only. Sits directly under
+   the leg's own figures so the pair reads as "this leg / the trip so far", and
+   is kept quieter than them -- the per-leg number is what the row is about. */
+.stop__running {
+  font-size: 12px;
+  color: var(--ink-muted);
+  margin-top: 1px;
+}
+
+/* Up to two lines, then ellipsised. A mid-route remark reads "En route to
+   North Slope Borough, Alaska (390 mi)" -- 47 characters, which one line in a
+   320px rail would cut before the destination, the part worth reading. Two
+   lines fit it whole while still bounding the row. Full text is on the title. */
+.stop__loc {
+  font-size: 12.5px;
+  line-height: 1.35;
+  color: var(--ink-soft);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+
+.stop__why {
+  font-size: 12px;
+  color: var(--ink-soft);
+  margin-top: 2px;
+}
+
+/* Never shrinks: the duration is the number being compared down the list, so
+   it must stay whole even when the label beside it is truncated. */
+.stop__dur {
+  flex: none;
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.tag {
+  display: inline-block;
+  margin-top: 5px;
+  padding: 2px 7px;
+  font-size: 11.5px;
+  font-weight: 600;
+  border-radius: 5px;
+  background: var(--accent-wash);
+  color: var(--accent-ink);
+}
+
+/* --- History -------------------------------------------------------------- */
+
+/* Caps at roughly six rows and scrolls. The form above it is the primary task,
+   and a long history would otherwise push it off the top of a laptop screen. */
+.history {
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 12px;
+}
+
+.history__empty {
+  margin: 0;
+  padding: 8px;
+  font-size: 12.5px;
+  color: var(--ink-soft);
+}
+
+.history__day + .history__day {
+  margin-top: 14px;
+}
+
+/* Sticks while its own group scrolls past, so the date a row belongs to is
+   never off-screen. */
+.history__date {
+  position: sticky;
+  top: -12px;
+  z-index: 1;
+  margin: 0 0 6px;
+  padding: 4px 8px;
+  background: var(--surface);
+  font-family: var(--font-display);
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.history__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.history__item {
+  width: 100%;
+  display: grid;
+  gap: 2px;
+  padding: 8px;
+  border: 0;
+  border-radius: var(--radius);
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.history__item:hover {
+  background: var(--surface-sunken);
+}
+
+.history__item:focus-visible {
+  outline: 2px solid var(--accent-dark);
+  outline-offset: -2px;
+}
+
+/* The trip on screen. A left rule rather than a fill, so it reads as a
+   position marker and not as a second hover state. */
+.history__item[aria-current="true"] {
+  background: var(--accent-wash);
+  box-shadow: inset 2px 0 0 var(--accent-dark);
+}
+
+.history__route {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  /* Labels run long ("Departamento Nueve de Julio, Rio Negro"); one line each
+     keeps every row the same height and the dates evenly spaced. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history__meta {
+  display: flex;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+/* --- Log sheet ------------------------------------------------------------ */
+
+.logs {
+  display: grid;
+  gap: 20px;
+}
+
+/* Two-up once a column can hold a sheet at a readable scale, one-up below.
+   The 680px floor is the real constraint, not a breakpoint: the grid is
+   authored 940 units wide, and under ~680px the hour numbers stop being
+   legible. auto-fill lets the browser decide from the space it actually has. */
+.sheets {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(680px, 1fr));
+  gap: 20px;
+  align-items: start;
+}
+
+.sheet {
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.sheet__head {
+  padding: 14px 20px;
+  border-bottom: 2px solid var(--navy);
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.sheet__title {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.sheet__date {
+  font-family: var(--font-display);
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.sheet__fields {
+  display: flex;
+  gap: 26px;
+  flex-wrap: wrap;
+}
+
+.sheet__field {
+  min-width: 92px;
+}
+
+.sheet__field dt {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.sheet__field dd {
+  margin: 1px 0 0;
+  font-size: 14.5px;
+  font-weight: 600;
+}
+
+/* The grid scrolls inside its own box on narrow screens; the page itself
+   must never scroll sideways. */
+.sheet__gridwrap {
+  overflow-x: auto;
+  padding: 8px 12px 0;
+}
+
+.sheet__grid {
+  min-width: 720px;
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.sheet__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 12px 20px 16px;
+  border-top: 1px solid var(--border);
+  background: var(--surface-sunken);
+}
+
+.certify {
+  font-size: 12px;
+  color: var(--ink-soft);
+  font-style: italic;
+}
+
+.total-check {
+  font-size: 13px;
+  font-weight: 640;
+}
+
+.total-check__ok {
+  color: var(--driving);
+}
+
+.total-check__bad {
+  color: var(--danger);
+}
+
+/* --- Location combobox ---------------------------------------------------- */
+
+.field--location {
+  position: relative;
+}
+
+/* Marks which field a map click will fill. The bar sits outside the input so
+   it cannot be mistaken for a validation state. */
+.field--active::before {
+  content: "";
+  position: absolute;
+  left: -12px;
+  top: 2px;
+  bottom: 18px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--accent-dark);
+}
+
+.field__pin {
+  margin-left: 8px;
+  padding: 1px 6px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--accent-ink);
+  background: var(--accent-wash);
+  border: 1px solid var(--accent-line);
+  border-radius: 999px;
+  vertical-align: 1px;
+}
+
+.combo {
+  position: relative;
+}
+
+.combo__spinner {
+  position: absolute;
+  right: 10px;
+  top: 12px;
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--border-strong);
+  border-top-color: var(--accent-dark);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+.combo__list {
+  position: absolute;
+  z-index: 500; /* above Leaflet's own panes, which start at 400 */
+  inset-inline: 0;
+  top: calc(100% + 4px);
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  max-height: 232px;
+  overflow-y: auto;
+}
+
+.combo__list[hidden] {
+  display: none;
+}
+
+.combo__option {
+  padding: 8px 10px;
+  font-size: 13.5px;
+  color: var(--ink);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.combo__option.is-active {
+  background: var(--accent-wash);
+  color: var(--accent-ink);
+}
+
+/* --- Location picker ------------------------------------------------------ */
+
+.picker__chips {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  padding: 0 20px 14px;
+}
+
+.chip {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-areas: "dot name" "place place";
+  gap: 2px 6px;
+  align-items: center;
+  padding: 8px 10px;
+  text-align: left;
+  font: inherit;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.chip--active {
+  border-color: var(--accent-dark);
+  box-shadow: 0 0 0 3px rgb(64 224 208 / 0.35);
+}
+
+.chip__dot {
+  grid-area: dot;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+
+/* Unset chips keep their colour but drop to an outline, so "which of these
+   still needs doing" is readable without relying on the dot's hue. */
+.chip:not(.chip--set) .chip__dot {
+  background: transparent !important;
+  border: 1.5px solid var(--border-strong);
+}
+
+.chip__name {
+  grid-area: name;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+.chip__place {
+  grid-area: place;
+  font-size: 12px;
+  color: var(--ink-soft);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chip:not(.chip--set) .chip__place {
+  font-style: italic;
+}
+
+/* The pin is down and its coordinates are real; only the place name is still
+   in flight. Dimmed rather than replaced with a spinner, so the row does not
+   jump when the name lands. */
+.chip__place--pending {
+  opacity: 0.55;
+}
+
+.picker__help {
+  margin: 0;
+  padding: 12px 20px 16px;
+  font-size: 12.5px;
+  color: var(--ink-soft);
+}
+
+/* Div icon rather than Leaflet's default marker PNGs, which bundlers rewrite
+   and break. Sized by iconSize in PickerMap; keep the two in step. */
+.pinicon span {
+  display: block;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 2.5px solid #ffffff;
+  box-shadow: 0 1px 4px rgb(26 32 44 / 0.45);
+}
+
+/* The pin for the field a map click would currently set. */
+.pinicon span.is-active {
+  box-shadow: 0 1px 4px rgb(26 32 44 / 0.45), 0 0 0 3px rgb(64 224 208 / 0.55);
+}
+
+.leaflet-container .pinicon {
+  cursor: grab;
+}
+
+/* Truck stops. Deliberately smaller and flatter than a location pin -- these
+   are candidates to choose from, not the choice itself, and there can be a
+   couple of hundred of them on screen at once. */
+.stopicon span {
+  display: block;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid #ffffff;
+  opacity: 0.75;
+  box-shadow: 0 1px 2px rgb(26 32 44 / 0.35);
+}
+
+/* A stop OSM actually has a name for -- the ones worth aiming at. */
+.stopicon span.is-named {
+  width: 14px;
+  height: 14px;
+  opacity: 1;
+  box-shadow: 0 1px 4px rgb(26 32 44 / 0.45);
+}
+
+.leaflet-container .stopicon {
+  cursor: pointer;
+}
+
+.picker__tools {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.picker__tools .card__hint {
+  text-align: right;
+}
+
+.toggle {
+  flex: none;
+  padding: 5px 11px;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 650;
+  color: var(--ink-soft);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.toggle:hover {
+  border-color: var(--accent-dark);
+}
+
+.toggle--on {
+  color: var(--accent-ink);
+  background: var(--accent-wash);
+  border-color: var(--accent-dark);
+}
+
+.toggle:focus-visible {
+  outline: 2px solid var(--accent-dark);
+  outline-offset: 2px;
+}
+
+/* --- Map ------------------------------------------------------------------ */
+
+.mapwrap {
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+/* Shorter than the route map: this one shares the column with the form's
+   guidance and does not need to show a cross-country polyline. */
+.mapwrap--picker .map {
+  height: 360px;
+  cursor: crosshair;
+}
+
+.placeholder--compact {
+  min-height: 0;
+  padding: 24px;
+}
+
+.map {
+  height: var(--map-h);
+  width: 100%;
+  background: var(--surface-sunken);
+}
+
+@media (max-width: 700px) {
+  .map {
+    height: 300px;
+  }
+}
+
+/* --- Results row (map beside timeline) ------------------------------------ */
+
+.results {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 20px;
+  align-items: stretch;
+}
+
+.results > .card {
+  min-width: 0;
+}
+
+/* The timeline runs level with the bottom of the route card instead of stopping
+   beside the legend.
+   `height: 0` keeps it from contributing to the row height -- otherwise a
+   50-row timeline would set the row and stretch the map to match, which is how
+   this first went wrong -- and `min-height: 100%` then fills whatever height
+   the route card established. No magic numbers, and it tracks automatically if
+   the map or legend changes. */
+.results > .card:last-child {
+  display: flex;
+  flex-direction: column;
+  height: 0;
+  min-height: 100%;
+}
+
+.timeline__scroll {
+  flex: 1;
+  min-block-size: 0; /* without this a flex child refuses to shrink and scroll */
+  overflow-y: auto;
+}
+
+
+/* Below this the two would each be too narrow to read, so they stack -- and
+   the timeline drops its cap, because a short scroll box inside a scrolling
+   page is worse than a long list. */
+@media (max-width: 1080px) {
+  .results {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* Stacked, the timeline has the full width and no map to run level with, so
+     it drops the cap: a short scroll box inside a scrolling page is worse than
+     a long list. */
+  .results > .card:last-child {
+    display: block;
+    height: auto;
+    min-height: 0;
+  }
+
+  .timeline__scroll {
+    flex: none;
+    overflow-y: visible;
+  }
+}
+
+/* Leaflet ships its own type scale; bring it back in line with the app. */
+.leaflet-container {
+  font-family: var(--font);
+  font-size: 12.5px;
+}
+
+.leaflet-tooltip {
+  font-size: 12px;
+  line-height: 1.4;
+  border-radius: 6px;
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-sm);
+}
+
+.map__legend {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 12px 20px;
+  font-size: 12.5px;
+  color: var(--ink-soft);
+}
+
+.map__dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1.5px var(--surface), 0 0 0 2.5px rgb(26 32 44 / 0.12);
+}
+
+/* --- Legend --------------------------------------------------------------- */
+
+.legend {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.legend__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  color: var(--ink-soft);
+}
+
+.legend__swatch {
+  width: 15px;
+  height: 4px;
+  border-radius: 2px;
+  background: currentColor;
+}
+
+/* --- Empty & loading states ----------------------------------------------- */
+
+.placeholder {
+  display: grid;
+  place-items: center;
+  min-height: 320px;
+  padding: 40px 24px;
+  text-align: center;
+  color: var(--ink-soft);
+  background: var(--surface);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-lg);
+}
+
+.placeholder h2 {
+  font-size: 16px;
+  color: var(--ink-soft);
+  margin-bottom: 6px;
+}
+
+.placeholder p {
+  margin: 0;
+  font-size: 13.5px;
+  max-width: 46ch;
+}
+
+.spinner {
+  width: 26px;
+  height: 26px;
+  margin-bottom: 14px;
+  border: 2.5px solid var(--border-strong);
+  border-top-color: var(--accent-ink);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation-duration: 2s;
+  }
+
+  * {
+    transition-duration: 0.01ms !important;
+  }
+}
+
+.assumptions {
+  font-size: 12.5px;
+  color: var(--ink-soft);
+}
+
+.assumptions ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+
+.assumptions li {
+  margin-bottom: 3px;
+}

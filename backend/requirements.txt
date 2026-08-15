@@ -1,0 +1,16 @@
+Django==6.1
+djangorestframework==3.18.0
+django-cors-headers==4.9.0
+requests==2.32.5
+
+# Database. SQLite is the local default; DATABASE_URL switches to Postgres in
+# production without a code change. psycopg is the driver Django uses to speak
+# the Postgres wire protocol; python-dotenv loads .env, which Django does not
+# read on its own.
+dj-database-url==3.0.1
+psycopg[binary]==3.2.10
+python-dotenv==1.1.1
+
+# Development / test
+pytest==9.1.1
+pytest-django==4.14.0
