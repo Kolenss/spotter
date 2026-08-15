@@ -23,10 +23,21 @@ ROUTE_MILES = 69.09
 
 
 @pytest.fixture(autouse=True)
-def clear_fetch_cache():
-    facilities._fetch.cache_clear()
+def clear_lookup_state():
+    """Reset both pieces of module state between tests.
+
+    The cache is the obvious one. The failure backoff is the one that bites:
+    it is a module-level timestamp, so a test that simulates an outage leaves
+    every later test suppressed for the next sixty seconds. In isolation they
+    all pass, which is exactly what makes it confusing to chase.
+    """
+    def reset():
+        facilities._fetch.cache_clear()
+        facilities._blocked_until = 0.0
+
+    reset()
     yield
-    facilities._fetch.cache_clear()
+    reset()
 
 
 def node(osm_id: int, lat: float, lon: float, **tags) -> dict:

@@ -1183,77 +1183,33 @@ h3 {
   cursor: grab;
 }
 
-/* Truck stops. Deliberately smaller and flatter than a location pin -- these
-   are candidates to choose from, not the choice itself, and there can be a
-   couple of hundred of them on screen at once. */
-.stopicon span {
-  display: block;
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  border: 2px solid #ffffff;
-  opacity: 0.75;
-  box-shadow: 0 1px 2px rgb(26 32 44 / 0.35);
-}
-
-/* A stop OSM actually has a name for -- the ones worth aiming at. */
-.stopicon span.is-named {
-  width: 14px;
-  height: 14px;
-  opacity: 1;
-  box-shadow: 0 1px 4px rgb(26 32 44 / 0.45);
-}
-
-.leaflet-container .stopicon {
-  cursor: pointer;
-}
-
-.picker__tools {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-width: 0;
-}
-
-.picker__tools .card__hint {
-  text-align: right;
-}
-
-.toggle {
-  flex: none;
-  padding: 5px 11px;
-  font: inherit;
-  font-size: 12.5px;
-  font-weight: 650;
-  color: var(--ink-soft);
-  background: var(--surface);
-  border: 1px solid var(--border-strong);
-  border-radius: 999px;
-  cursor: pointer;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
-}
-
-.toggle:hover {
-  border-color: var(--accent-dark);
-}
-
-.toggle--on {
-  color: var(--accent-ink);
-  background: var(--accent-wash);
-  border-color: var(--accent-dark);
-}
-
-.toggle:focus-visible {
-  outline: 2px solid var(--accent-dark);
-  outline-offset: 2px;
-}
-
 /* --- Map ------------------------------------------------------------------ */
 
 .mapwrap {
   border-top: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
+  /* The wheel-zoom hint is positioned against this. */
+  position: relative;
 }
+
+/* Until the map is clicked the wheel belongs to the page, so say so rather
+   than letting the map look broken when scrolling over it does nothing.
+   Pointer-events off: the hint sits over the map and must not eat the very
+   click it is asking for. */
+.map__hint {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  z-index: 500; /* over Leaflet's panes, under its controls at 800+ */
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: rgb(13 30 45 / 0.72);
+  color: #f8fafc;
+  font-size: 11.5px;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+
 
 /* Shorter than the route map: this one shares the column with the form's
    guidance and does not need to show a cross-country polyline. */
@@ -1363,6 +1319,43 @@ h3 {
   width: 10px;
   height: 10px;
   border-radius: 50%;
+  box-shadow: 0 0 0 1.5px var(--surface), 0 0 0 2.5px rgb(26 32 44 / 0.12);
+}
+
+/* --- Route stop markers --------------------------------------------------- */
+
+/* Leaflet paints .leaflet-div-icon with a white fill and a blue border of its
+   own. Both have to be cleared or every marker sits in a small white box. */
+.stoppin {
+  background: none;
+  border: 0;
+}
+
+/* The coloured disc carrying the glyph. Colour still means duty status, the
+   same as the timeline and the log grid; the glyph says which errand it is,
+   which colour alone could not -- fuel, pickup and drop-off are all on-duty
+   amber, and a 10-hour rest and a 34-hour restart are both sleeper purple. */
+.stoppin__disc {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  line-height: 1;
+  /* White ring first so the disc reads over any tile, then a soft drop so it
+     lifts off the route line it sits on. */
+  box-shadow: 0 0 0 2px var(--surface), 0 1px 4px rgb(26 32 44 / 0.35);
+  /* Emoji are text: stop them inheriting the tabular figures used elsewhere,
+     and keep them from being selectable when the map is dragged. */
+  font-family: var(--font);
+  user-select: none;
+}
+
+/* The legend's copy of the disc, a size down so a row of seven still fits. */
+.map__key {
+  width: 20px;
+  height: 20px;
+  font-size: 11px;
+  flex: none;
   box-shadow: 0 0 0 1.5px var(--surface), 0 0 0 2.5px rgb(26 32 44 / 0.12);
 }
 
