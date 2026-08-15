@@ -35,19 +35,9 @@ ORS_PAYLOAD = {
 }
 
 
-@pytest.fixture(autouse=True)
-def no_key_by_default(monkeypatch):
-    """Truck routing is off unless a test switches it on.
-
-    Without this the suite's behaviour would depend on whether the developer
-    running it happens to have a key in their environment.
-    """
-    monkeypatch.delenv(ors.API_KEY_ENV, raising=False)
-    yield
-
-
 @pytest.fixture
 def with_key(monkeypatch):
+    """Switch truck routing on. Off by default -- see backend/conftest.py."""
     monkeypatch.setenv(ors.API_KEY_ENV, "test-key-123")
 
 

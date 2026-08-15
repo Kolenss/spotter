@@ -9,6 +9,7 @@ from __future__ import annotations
 from rest_framework import serializers
 
 from hos.logsheet import build_log_sheets
+from hos.planner import FORCED_STOP_MARKER
 from hos.rules import BREAK_MINUTES, DutyStatus
 from hos.state import DutyEvent as EngineEvent
 from routing.facilities import DEFAULT_LOOKBACK_MILES
@@ -83,6 +84,17 @@ class TripInputSerializer(serializers.Serializer):
         return attrs
 
 
+class ForcedStopSerializer(serializers.Serializer):
+    """One stop the driver wants moved earlier."""
+
+    route_miles = serializers.FloatField(min_value=0)
+    kind = serializers.ChoiceField(choices=sorted(PARKABLE_KINDS))
+
+
+class ReplanSerializer(serializers.Serializer):
+    forced_stops = ForcedStopSerializer(many=True, allow_empty=False)
+
+
 def _to_engine_events(trip: Trip) -> list[EngineEvent]:
     return [
         EngineEvent(
@@ -120,6 +132,8 @@ class TripSerializer(serializers.ModelSerializer):
             "summary",
             "timeline",
             "daily_logs",
+            "forced_stops",
+            "replanned_from",
         ]
 
     # -- Cached derivations --------------------------------------------------
@@ -271,6 +285,10 @@ class TripSerializer(serializers.ModelSerializer):
                     "satisfies_break": (
                         not driving and event.minutes >= BREAK_MINUTES and kind != "break"
                     ),
+                    # The driver put this one here, not the regulation. Without
+                    # it the timeline shows a moved rest identically to an
+                    # automatic one, and the whole point of moving it is lost.
+                    "moved_by_driver": FORCED_STOP_MARKER in event.note,
                     # Where the driver could actually put the truck. Empty for
                     # driving legs, for the shipper and receiver (both real
                     # addresses), and whenever Overpass had nothing or was down.

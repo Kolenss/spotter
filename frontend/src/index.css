@@ -448,6 +448,14 @@ h3 {
   color: #92400e;
 }
 
+/* Neither a failure nor a warning: the driver asked for this and it worked.
+   Takes the accent wash so it reads as an answer rather than a problem. */
+.alert--info {
+  background: var(--accent-wash);
+  border-color: var(--accent-line);
+  color: var(--accent-ink);
+}
+
 /* --- Stats ---------------------------------------------------------------- */
 
 .stats {
@@ -682,6 +690,38 @@ h3 {
   column-gap: 8px;
 }
 
+/* The whole row is the button: picking where to sleep and re-planning around
+   it are one decision, so they should not be two clicks. Reset to look like the
+   list item it replaced, then given affordance on hover. */
+.parking__pick {
+  display: grid;
+  grid-template-columns: subgrid;
+  grid-column: 1 / -1;
+  align-items: baseline;
+  column-gap: 8px;
+  width: 100%;
+  padding: 3px 5px;
+  margin: -3px -5px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.parking__pick:hover:not(:disabled),
+.parking__pick:focus-visible {
+  background: var(--surface);
+  outline: 1px solid var(--border-strong);
+}
+
+.parking__pick:disabled {
+  cursor: progress;
+  opacity: 0.55;
+}
+
 .parking__name {
   font-size: 12.5px;
   font-weight: 600;
@@ -741,6 +781,14 @@ h3 {
   border-radius: 5px;
   background: var(--accent-wash);
   color: var(--accent-ink);
+}
+
+/* A different colour from the accent tag beside it: one states a fact about
+   the regulation, this one marks a decision the driver made. */
+.tag--moved {
+  background: var(--warn-wash);
+  color: #92400e;
+  margin-left: 6px;
 }
 
 /* --- History -------------------------------------------------------------- */

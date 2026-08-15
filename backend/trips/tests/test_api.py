@@ -224,6 +224,136 @@ def test_overpass_being_down_still_returns_a_complete_plan(client, monkeypatch):
         assert sheet["total_hours"] == 24.0
 
 
+# -- Moving a stop earlier ----------------------------------------------------
+
+
+def _plan(client) -> dict:
+    return client.post("/api/trips/", PAYLOAD, content_type="application/json").json()
+
+
+def _replan(client, trip_id: int, route_miles: float, kind: str = "reset"):
+    return client.post(
+        f"/api/trips/{trip_id}/replan/",
+        {"forced_stops": [{"route_miles": route_miles, "kind": kind}]},
+        content_type="application/json",
+    )
+
+
+def test_moving_a_rest_earlier_creates_a_second_plan(client):
+    """Both survive, so the driver can see what the change cost."""
+    original = _plan(client)
+
+    response = _replan(client, original["id"], 300.0)
+    replan = response.json()
+
+    assert response.status_code == 201
+    assert replan["id"] != original["id"]
+    assert replan["replanned_from"] == original["id"]
+    assert replan["forced_stops"] == [{"route_miles": 300.0, "kind": "reset"}]
+    # The original is untouched and still fetchable.
+    assert client.get(f"/api/trips/{original['id']}/").json()["timeline"] == original[
+        "timeline"
+    ]
+
+
+def test_the_replan_takes_the_rest_where_it_was_asked_for(client):
+    original = _plan(client)
+
+    replan = _replan(client, original["id"], 300.0).json()
+
+    moved = [e for e in replan["timeline"] if "moved earlier" in e["label"]]
+    assert len(moved) == 1
+    driven = 0.0
+    for entry in replan["timeline"]:
+        if entry is moved[0]:
+            break
+        if entry["kind"] == "driving":
+            driven += entry["miles"]
+    assert driven == pytest.approx(300.0, abs=1.0)
+
+
+def test_the_replan_is_still_a_valid_set_of_log_sheets(client):
+    original = _plan(client)
+
+    replan = _replan(client, original["id"], 300.0).json()
+
+    for sheet in replan["daily_logs"]:
+        assert sheet["total_hours"] == 24.0
+        assert sum(sheet["totals"].values()) == pytest.approx(24.0, abs=0.01)
+
+
+def test_the_replan_covers_the_same_distance(client):
+    original = _plan(client)
+
+    replan = _replan(client, original["id"], 300.0).json()
+
+    assert replan["route"]["total_miles"] == original["route"]["total_miles"]
+
+
+def test_replanning_makes_no_network_calls(client, monkeypatch):
+    """The route is reused wholesale, so nothing needs looking up again.
+
+    This is what makes a re-plan fast and, more importantly, guarantees the two
+    plans are comparable -- a fresh route lookup could return different mileage
+    and make the before/after difference meaningless.
+    """
+    original = _plan(client)
+
+    def explode(*args, **kwargs):  # pragma: no cover - must not be reached
+        raise AssertionError("re-planning must not call the routing services")
+
+    monkeypatch.setattr(services, "route", explode)
+    monkeypatch.setattr(services, "geocode", explode)
+    monkeypatch.setattr(services, "find_along", explode)
+
+    assert _replan(client, original["id"], 300.0).status_code == 201
+
+
+def test_the_parking_options_carry_over_to_the_replan(client, monkeypatch):
+    monkeypatch.setattr(services, "find_along", _two_per_stop)
+    original = _plan(client)
+
+    replan = _replan(client, original["id"], 300.0).json()
+
+    assert any(entry["facilities"] for entry in replan["timeline"])
+
+
+def test_a_stop_cannot_be_moved_later(client):
+    """Only earlier is offered, and the API enforces it rather than trusting.
+
+    A negative mile marker is the nearest thing the wire format has to "later",
+    and it is rejected outright.
+    """
+    original = _plan(client)
+
+    response = _replan(client, original["id"], -50.0)
+
+    assert response.status_code == 400
+
+
+def test_an_unknown_kind_of_stop_is_rejected(client):
+    original = _plan(client)
+
+    assert _replan(client, original["id"], 300.0, kind="lunch").status_code == 400
+    # Pickup and drop-off happen at addresses, not at a mile marker.
+    assert _replan(client, original["id"], 300.0, kind="pickup").status_code == 400
+
+
+def test_replanning_a_missing_trip_is_a_404(client):
+    assert _replan(client, 999_999, 300.0).status_code == 404
+
+
+def test_a_trip_predating_the_feature_explains_itself(client):
+    """Older rows have no per-leg distances, so they cannot be re-planned."""
+    original = _plan(client)
+    Trip.objects.filter(pk=original["id"]).update(legs=[])
+
+    response = _replan(client, original["id"], 300.0)
+
+    assert response.status_code == 400
+    assert "plan it again" in response.json()["detail"].lower()
+
+
 def test_pickup_and_dropoff_appear_as_on_duty_stops(client):
     body = client.post("/api/trips/", PAYLOAD, content_type="application/json").json()
 

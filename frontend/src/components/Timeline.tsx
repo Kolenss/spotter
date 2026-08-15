@@ -2,6 +2,7 @@ import {
   CYCLE_LIMIT,
   cycleTier,
   STOP_LABEL,
+  type ForcedStop,
   type StopKind,
   type TimelineEntry,
 } from "../types";
@@ -91,9 +92,18 @@ interface Props {
   timeline: TimelineEntry[];
   /** Hours already on the 70-hour cycle before this trip's first mile. */
   cycleUsedAtStart: number;
+  /** Move a stop to a chosen facility and re-plan the rest of the trip. */
+  onShift?: (stop: ForcedStop) => void;
+  /** A re-plan is in flight; the controls are inert until it lands. */
+  shifting?: boolean;
 }
 
-export function Timeline({ timeline, cycleUsedAtStart }: Props) {
+export function Timeline({
+  timeline,
+  cycleUsedAtStart,
+  onShift,
+  shifting = false,
+}: Props) {
   const stopCount = timeline.filter((entry) => entry.kind !== "driving").length;
   const totals = runningTotals(timeline, cycleUsedAtStart);
   const tripMiles = totals.length ? totals[totals.length - 1].miles : 0;
@@ -198,6 +208,12 @@ export function Timeline({ timeline, cycleUsedAtStart }: Props) {
                   {entry.satisfies_break && (
                     <span className="tag">Also satisfies the 30-min break</span>
                   )}
+                  {/* Otherwise a stop the driver moved looks exactly like one
+                      the regulation forced, and the change they just made is
+                      invisible in the very list they made it from. */}
+                  {entry.moved_by_driver && (
+                    <span className="tag tag--moved">You moved this stop</span>
+                  )}
 
                   {/* The engine picks the mile marker; it cannot pick a place.
                       Every one of these sits at or before that marker, because
@@ -216,24 +232,38 @@ export function Timeline({ timeline, cycleUsedAtStart }: Props) {
                       <ul className="parking__list">
                         {entry.facilities.map((facility) => (
                           <li className="parking__item" key={facility.osm_id}>
-                            <span
-                              className="parking__name"
-                              title={`${facility.name} · ${TRUCK_STOP_LABEL[facility.kind]}`}
+                            {/* The whole row is the control. Picking a place to
+                                sleep and re-planning around it are the same
+                                decision, so they should not be two clicks. */}
+                            <button
+                              type="button"
+                              className="parking__pick"
+                              disabled={shifting}
+                              onClick={() =>
+                                onShift?.({
+                                  route_miles: facility.route_miles,
+                                  kind: entry.kind as ForcedStop["kind"],
+                                })
+                              }
+                              title={`Move this stop to ${facility.name} (${TRUCK_STOP_LABEL[facility.kind]}) and re-plan the rest of the trip`}
                             >
-                              {facility.name}
-                            </span>
-                            {/* The number being traded: stop here and the whole
-                                remaining plan shifts earlier by this much. */}
-                            <span className="parking__when num">
-                              {facility.miles_before_stop < 0.5
-                                ? "at the stop"
-                                : `${Math.round(facility.miles_before_stop)} mi earlier`}
-                            </span>
-                            {facility.amenities.length > 0 && (
-                              <span className="parking__amenities">
-                                {facility.amenities.join(" · ")}
+                              <span className="parking__name">
+                                {facility.name}
                               </span>
-                            )}
+                              {/* The number being traded: stop here and the
+                                  whole remaining plan shifts earlier by this
+                                  much. */}
+                              <span className="parking__when num">
+                                {facility.miles_before_stop < 0.5
+                                  ? "at the stop"
+                                  : `${Math.round(facility.miles_before_stop)} mi earlier`}
+                              </span>
+                              {facility.amenities.length > 0 && (
+                                <span className="parking__amenities">
+                                  {facility.amenities.join(" · ")}
+                                </span>
+                              )}
+                            </button>
                           </li>
                         ))}
                       </ul>

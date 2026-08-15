@@ -44,6 +44,27 @@ class Trip(models.Model):
     total_distance_miles = models.FloatField(default=0)
     total_duration_minutes = models.IntegerField(default=0)
 
+    #: Per-leg [{"miles": .., "minutes": ..}] for current->pickup and
+    #: pickup->dropoff. Stored so a re-plan can rebuild the exact same legs
+    #: without calling the routing service again: re-routing would cost two
+    #: network round trips and could quietly return different mileage, which
+    #: would make the before/after comparison meaningless.
+    legs = models.JSONField(default=list, blank=True)
+
+    #: Stops the driver moved earlier than the rules demanded, as
+    #: [{"route_miles": .., "kind": ..}]. Empty for a plan nobody has adjusted.
+    forced_stops = models.JSONField(default=list, blank=True)
+
+    #: The plan this one was produced from by moving a stop. Both survive, so
+    #: the driver can compare what the change cost.
+    replanned_from = models.ForeignKey(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="replans",
+    )
+
     #: GeoJSON coordinate pairs for the whole route. Persisted but unused until
     #: the map ships; storing it now means that is a frontend-only change.
     route_geometry = models.JSONField(default=list, blank=True)

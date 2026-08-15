@@ -114,6 +114,8 @@ export interface TimelineEntry {
   lon: number | null;
   /** A 30+ minute non-driving block also satisfies the required break. */
   satisfies_break: boolean;
+  /** The driver moved this stop earlier; the regulation did not put it here. */
+  moved_by_driver: boolean;
   /** Places to park, at or before this stop. Empty for driving legs, for the
    *  shipper and receiver, and whenever Overpass had nothing or was down. */
   facilities: Facility[];
@@ -145,6 +147,13 @@ export interface DailyLog {
   remarks: LogRemark[];
 }
 
+/** A stop the driver moved earlier than the rules demanded. */
+export interface ForcedStop {
+  /** Miles from the start of the trip, not from the start of a leg. */
+  route_miles: number;
+  kind: "reset" | "restart" | "break" | "fuel";
+}
+
 export interface Trip {
   id: number;
   created_at: string;
@@ -153,6 +162,10 @@ export interface Trip {
   summary: TripSummary;
   timeline: TimelineEntry[];
   daily_logs: DailyLog[];
+  /** Empty for a plan nobody has adjusted. */
+  forced_stops: ForcedStop[];
+  /** The plan this was produced from by moving a stop, if any. */
+  replanned_from: number | null;
 }
 
 /** The three locations, as keyed in the request and on the picker map. */
