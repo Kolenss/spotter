@@ -43,7 +43,10 @@ def respond_with(monkeypatch, elements, recorder: list | None = None):
         def json(self):
             return {"elements": elements}
 
-    def fake_post(url, data=None, timeout=None):
+    def fake_post(url, data=None, headers=None, timeout=None):
+        assert headers and headers.get("User-Agent"), (
+            "Overpass mirrors rate-limit anonymous requests with a 429"
+        )
         if recorder is not None:
             recorder.append(data["data"])
         return FakeResponse()
@@ -117,6 +120,64 @@ def test_a_timeout_degrades_the_same_way(monkeypatch):
     assert find_along(ROUTE, [40.0], ROUTE_MILES) == ()
 
 
+def test_a_dead_mirror_falls_through_to_a_live_one(monkeypatch):
+    """The busiest endpoint refuses connections outright when saturated.
+
+    It was unreachable from the development machine for the whole of this
+    build while the mirrors answered, so this is the common case, not the
+    exotic one.
+    """
+    attempted: list[str] = []
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"elements": [node(1, 40.5, -100.0, highway="services", name="Sapp Bros")]}
+
+    def fake_post(url, data=None, headers=None, timeout=None):
+        attempted.append(url)
+        if len(attempted) == 1:
+            raise requests.ConnectTimeout("main endpoint saturated")
+        return FakeResponse()
+
+    monkeypatch.setattr(facilities.requests, "post", fake_post)
+
+    (facility,) = find_along(ROUTE, [40.0], ROUTE_MILES)
+
+    assert facility.name == "Sapp Bros"
+    assert len(attempted) == 2, "should stop at the first mirror that answers"
+
+
+def test_a_mirror_serving_an_html_error_page_is_skipped(monkeypatch):
+    """Some mirrors answer 200 with HTML when overloaded, not JSON."""
+    attempted: list[str] = []
+
+    class Good:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"elements": [node(1, 40.5, -100.0, highway="rest_area")]}
+
+    class HtmlErrorPage:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            raise ValueError("Expecting value: line 1 column 1")
+
+    def fake_post(url, data=None, headers=None, timeout=None):
+        attempted.append(url)
+        return HtmlErrorPage() if len(attempted) == 1 else Good()
+
+    monkeypatch.setattr(facilities.requests, "post", fake_post)
+
+    assert len(find_along(ROUTE, [40.0], ROUTE_MILES)) == 1
+    assert len(attempted) == 2
+
+
 def test_a_nonsense_payload_degrades_rather_than_raising(monkeypatch):
     class FakeResponse:
         def raise_for_status(self):
@@ -171,14 +232,15 @@ def test_an_area_is_read_from_its_centre(monkeypatch):
 
 
 def test_untagged_and_car_only_features_are_ignored(monkeypatch):
-    """A fuel station without ``hgv=yes`` cannot take an 80,000 lb truck."""
+    """A forecourt with no hgv tag cannot take an 80,000 lb combination."""
     respond_with(
         monkeypatch,
         [
             node(1, 40.5, -100.0, amenity="fuel"),
             node(2, 40.5, -100.0, amenity="parking"),
             node(3, 40.5, -100.0),
-            node(4, 40.5, -100.0, amenity="fuel", hgv="yes", name="Love's"),
+            node(4, 40.5, -100.0, amenity="fuel", hgv="no", name="Walmart"),
+            node(5, 40.5, -100.0, amenity="fuel", hgv="yes", name="Love's"),
         ],
     )
 
@@ -186,6 +248,38 @@ def test_untagged_and_car_only_features_are_ignored(monkeypatch):
 
     assert [facility.name for facility in found] == ["Love's"]
     assert found[0].kind == "fuel"
+
+
+def test_hgv_designated_counts_as_truck_legal(monkeypatch):
+    """`designated` is the common US spelling, and the stronger of the two.
+
+    Measured against a box of I-80 in Nebraska, seven truck fuel stations were
+    tagged `designated` and none `yes`. Accepting only `yes` found nothing.
+    """
+    respond_with(
+        monkeypatch,
+        [
+            node(1, 40.5, -100.0, amenity="fuel", hgv="designated", name="Flying J"),
+            node(2, 40.5, -100.0, amenity="parking", hgv="designated", name="Truck lot"),
+        ],
+    )
+
+    found = find_along(ROUTE, [40.0], ROUTE_MILES)
+
+    assert {facility.name for facility in found} == {"Flying J", "Truck lot"}
+
+
+def test_the_query_accepts_both_hgv_spellings(monkeypatch):
+    queries: list[str] = []
+    respond_with(monkeypatch, [], recorder=queries)
+
+    find_along(ROUTE, [40.0], ROUTE_MILES)
+
+    assert '"hgv"~"^(yes|designated)$"' in queries[0]
+    # Service areas take trucks by definition and must not be hgv-filtered --
+    # it is how TA and Flying J travel centres are mapped.
+    services = queries[0].split('nwr["highway"="services"]')[1].split(";")[0]
+    assert "hgv" not in services
 
 
 def test_an_unnamed_feature_falls_back_to_its_kind(monkeypatch):
@@ -254,8 +348,8 @@ def test_the_query_asks_for_all_four_kinds_and_their_centres(monkeypatch):
     query = queries[0]
     assert '"highway"="services"' in query
     assert '"highway"="rest_area"' in query
-    assert '"amenity"="fuel"]["hgv"="yes"' in query
-    assert '"amenity"="parking"]["hgv"="yes"' in query
+    assert '"amenity"="fuel"' in query
+    assert '"amenity"="parking"' in query
     assert "out center tags" in query
 
 

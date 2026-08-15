@@ -37,11 +37,27 @@ from typing import Iterable, Sequence
 
 import requests
 
+from .client import USER_AGENT
 from .geometry import Point, cumulative_miles, haversine_miles
 
 logger = logging.getLogger(__name__)
 
-OVERPASS_URL = "https://overpass-api.de/api/interpreter"
+#: Overpass endpoints, tried in order until one answers.
+#:
+#: The main endpoint refuses connections outright when saturated -- it was
+#: unreachable from the development machine throughout this build -- so a
+#: fallback is worth having. A driver should not lose their parking options
+#: because one volunteer-run server is having a bad afternoon.
+#:
+#: **Only planet-wide instances belong here.** ``overpass.osm.ch`` was tried and
+#: removed: it is the Swiss chapter's server and carries Switzerland alone, so
+#: it answers a query over Nebraska with ``200 OK`` and zero elements. That is
+#: strictly worse than an error, because it looks exactly like "there is nowhere
+#: to park here" and stops the failover chain before a real server is asked.
+OVERPASS_URLS = (
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter",
+)
 
 #: Our own socket timeout. Deliberately longer than the QL timeout below so the
 #: server gives up first and answers with an error we can read, rather than us
@@ -68,14 +84,28 @@ MAX_WINDOWS = 12
 #: Degrees of latitude per mile. Longitude is this over cos(latitude).
 MILES_PER_DEGREE_LATITUDE = 69.0
 
+#: How OSM says "trucks are welcome here". Both spellings have to be accepted:
+#: measured over a box of I-80 in Nebraska, seven truck fuel stations carried
+#: ``hgv=designated`` -- Flying J among them -- and *not one* carried
+#: ``hgv=yes``. Matching only ``yes``, as this first did, found none of them.
+#: ``designated`` is the stronger claim of the two: specifically intended for
+#: heavy goods vehicles, rather than merely permitted.
+_HGV_ALLOWED = frozenset({"yes", "designated"})
+_HGV_FILTER = '["hgv"~"^(yes|designated)$"]'
+
 #: OSM tag combinations worth offering a driver, mapped to our own kind.
 #: ``nwr`` matches nodes, ways and relations in one statement; services and
 #: rest areas are usually mapped as areas rather than points.
+#:
+#: ``highway=services`` needs no hgv filter -- a motorway service area takes
+#: trucks by definition, and it is how the big US travel centres (TA, Flying J)
+#: are mapped. Fuel and parking do need it: an ordinary filling station
+#: forecourt cannot physically take an 80,000 lb combination.
 _TAG_QUERIES = (
     ('["highway"="services"]', "truck_stop"),
     ('["highway"="rest_area"]', "rest_area"),
-    ('["amenity"="fuel"]["hgv"="yes"]', "fuel"),
-    ('["amenity"="parking"]["hgv"="yes"]', "parking"),
+    (f'["amenity"="fuel"]{_HGV_FILTER}', "fuel"),
+    (f'["amenity"="parking"]{_HGV_FILTER}', "parking"),
 )
 
 #: Fallback names, used when OSM has the feature but nobody has named it.
@@ -277,22 +307,42 @@ def _build_query(boxes: tuple[tuple[float, float, float, float], ...]) -> str:
 
 @lru_cache(maxsize=64)
 def _fetch(query: str) -> tuple[dict, ...]:
-    """POST the query and return its elements.
+    """POST the query to the first mirror that answers, and return its elements.
 
     Cached on the query text, which is deterministic for a given route: opening
     the same trip twice costs one lookup. Failures raise rather than returning
     empty so that ``lru_cache`` does not memoise an outage -- it only caches
     successful returns.
+
+    A mirror that is merely *busy* still counts as an answer for our purposes
+    only if it returns parseable JSON; several return an HTML error page with a
+    200, which is why the body is parsed here rather than by the caller.
     """
-    response = requests.post(
-        OVERPASS_URL,
-        data={"data": query},
-        timeout=REQUEST_TIMEOUT_SECONDS,
-    )
-    response.raise_for_status()
-    payload = response.json()
-    elements = payload.get("elements") if isinstance(payload, dict) else None
-    return tuple(elements or ())
+    last_error: Exception | None = None
+
+    for url in OVERPASS_URLS:
+        try:
+            # The same User-Agent Nominatim demands, and for the same reason:
+            # kumi answers an anonymous request with "429 Please include a
+            # meaningful User-Agent string with your requests to avoid
+            # rate-limiting". Verified against the live server.
+            response = requests.post(
+                url,
+                data={"data": query},
+                headers={"User-Agent": USER_AGENT},
+                timeout=REQUEST_TIMEOUT_SECONDS,
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except (requests.RequestException, ValueError) as exc:
+            logger.info("Overpass mirror %s unavailable (%s); trying the next.", url, exc)
+            last_error = exc
+            continue
+
+        elements = payload.get("elements") if isinstance(payload, dict) else None
+        return tuple(elements or ())
+
+    raise last_error or requests.RequestException("no Overpass mirror answered")
 
 
 # -- Parsing -----------------------------------------------------------------
@@ -323,9 +373,9 @@ def _kind_for(tags: dict) -> str | None:
         return "truck_stop"
     if tags.get("highway") == "rest_area":
         return "rest_area"
-    if tags.get("amenity") == "fuel" and tags.get("hgv") == "yes":
+    if tags.get("amenity") == "fuel" and tags.get("hgv") in _HGV_ALLOWED:
         return "fuel"
-    if tags.get("amenity") == "parking" and tags.get("hgv") == "yes":
+    if tags.get("amenity") == "parking" and tags.get("hgv") in _HGV_ALLOWED:
         return "parking"
     return None
 

@@ -5,6 +5,7 @@ import {
   type StopKind,
   type TimelineEntry,
 } from "../types";
+import { TRUCK_STOP_LABEL } from "../truckStops";
 
 const KIND_COLOR: Record<string, string> = {
   driving: "var(--driving)",
@@ -196,6 +197,47 @@ export function Timeline({ timeline, cycleUsedAtStart }: Props) {
                   )}
                   {entry.satisfies_break && (
                     <span className="tag">Also satisfies the 30-min break</span>
+                  )}
+
+                  {/* The engine picks the mile marker; it cannot pick a place.
+                      Every one of these sits at or before that marker, because
+                      starting a rest early is legal and finishing the drive
+                      late is not. */}
+                  {entry.facilities.length > 0 && (
+                    <div className="parking">
+                      <div className="parking__head">
+                        Where to stop &mdash; {entry.facilities.length} within{" "}
+                        {Math.ceil(
+                          entry.facilities[entry.facilities.length - 1]
+                            .miles_before_stop,
+                        )}{" "}
+                        mi before
+                      </div>
+                      <ul className="parking__list">
+                        {entry.facilities.map((facility) => (
+                          <li className="parking__item" key={facility.osm_id}>
+                            <span
+                              className="parking__name"
+                              title={`${facility.name} · ${TRUCK_STOP_LABEL[facility.kind]}`}
+                            >
+                              {facility.name}
+                            </span>
+                            {/* The number being traded: stop here and the whole
+                                remaining plan shifts earlier by this much. */}
+                            <span className="parking__when num">
+                              {facility.miles_before_stop < 0.5
+                                ? "at the stop"
+                                : `${Math.round(facility.miles_before_stop)} mi earlier`}
+                            </span>
+                            {facility.amenities.length > 0 && (
+                              <span className="parking__amenities">
+                                {facility.amenities.join(" · ")}
+                              </span>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
                   )}
                 </div>
               </li>
