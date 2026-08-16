@@ -5,7 +5,6 @@ import {
   loadHistory,
   loadTrip,
   planTrip,
-  replanTrip,
   type FieldErrors,
 } from "./api";
 import { LogSheet } from "./components/LogSheet";
@@ -17,7 +16,6 @@ import { TripMap } from "./components/TripMap";
 import { TripSummary } from "./components/TripSummary";
 import {
   DUTY_ROWS,
-  type ForcedStop,
   type LocationKey,
   type PlaceSuggestion,
   type Trip,
@@ -34,58 +32,6 @@ const STATUS_COLOR: Record<string, string> = {
 
 type Tab = "plan" | "history";
 
-/** Rounds to the nearest minute before comparing — two plans that arrive at the
- *  same clock time must not read as "0h later" versus "unchanged". */
-function hoursBetween(from: string, to: string): number {
-  return (new Date(to).getTime() - new Date(from).getTime()) / 3_600_000;
-}
-
-function spellDuration(hours: number): string {
-  const total = Math.round(Math.abs(hours) * 60);
-  const days = Math.floor(total / 1440);
-  const rest = total % 1440;
-  const parts = [
-    days ? `${days}d` : "",
-    Math.floor(rest / 60) ? `${Math.floor(rest / 60)}h` : "",
-    rest % 60 ? `${rest % 60}m` : "",
-  ].filter(Boolean);
-  return parts.length ? parts.join(" ") : "0m";
-}
-
-/** What moving a stop cost, before and after. */
-function ShiftCost({ before, after }: { before: Trip; after: Trip }) {
-  if (!before.summary.ends_at || !after.summary.ends_at) return null;
-
-  const later = hoursBetween(before.summary.ends_at, after.summary.ends_at);
-  const extraStops =
-    after.timeline.filter((entry) => entry.kind !== "driving").length -
-    before.timeline.filter((entry) => entry.kind !== "driving").length;
-
-  return (
-    <div className="alert alert--info" role="status">
-      <strong>Stop moved.</strong>{" "}
-      {Math.abs(later) < 0.017 ? (
-        <>Arrival is unchanged — this one is free.</>
-      ) : later > 0 ? (
-        <>
-          Arrival is <strong>{spellDuration(later)} later</strong>.
-        </>
-      ) : (
-        <>
-          Arrival is <strong>{spellDuration(later)} earlier</strong>.
-        </>
-      )}
-      {extraStops > 0 && (
-        <>
-          {" "}
-          It also forced {extraStops} more stop{extraStops === 1 ? "" : "s"}.
-        </>
-      )}{" "}
-      The previous plan is still in History.
-    </div>
-  );
-}
-
 export default function App() {
   const [trip, setTrip] = useState<Trip | null>(null);
   const [loading, setLoading] = useState(false);
@@ -93,11 +39,6 @@ export default function App() {
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [history, setHistory] = useState<TripListItem[]>([]);
   const [tab, setTab] = useState<Tab>("plan");
-  /* The plan as it stood before the driver moved a stop, kept only to show what
-     the move cost. Not persisted -- once you navigate away the comparison has
-     served its purpose, and both trips are in History regardless. */
-  const [beforeShift, setBeforeShift] = useState<Trip | null>(null);
-  const [shifting, setShifting] = useState(false);
 
   /* The one request that has to survive a cold start: it fires on first paint,
      which is exactly when a free-tier service is most likely to be asleep. */
@@ -140,7 +81,6 @@ export default function App() {
 
     try {
       setTrip(await planTrip(request));
-      setBeforeShift(null);
       // The plan is already on screen; refreshing the list is cosmetic, so it
       // must not delay it or fail the submit.
       listTrips().then(setHistory);
@@ -161,7 +101,6 @@ export default function App() {
    *  second run can change one field rather than retype all four. */
   function handleBack() {
     setTrip(null);
-    setBeforeShift(null);
     setError(null);
     setTab("plan");
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -181,34 +120,9 @@ export default function App() {
   function handleTab(next: Tab) {
     if (next === "plan" && trip) {
       setTrip(null);
-      setBeforeShift(null);
       setError(null);
     }
     setTab(next);
-  }
-
-  /** Move a stop to a chosen truck stop and re-plan everything after it. */
-  async function handleShift(stop: ForcedStop) {
-    if (!trip) return;
-    setShifting(true);
-    setError(null);
-
-    // Compare against the plan the driver is looking at, not the chain's
-    // original: moving a second stop should show the cost of *that* move.
-    const previous = trip;
-    try {
-      setTrip(await replanTrip(trip.id, [...trip.forced_stops, stop]));
-      setBeforeShift(previous);
-      listTrips().then(setHistory);
-    } catch (caught) {
-      setError(
-        caught instanceof ApiError
-          ? caught.message
-          : "Something went wrong while moving the stop.",
-      );
-    } finally {
-      setShifting(false);
-    }
   }
 
   async function handleOpenTrip(id: number) {
@@ -430,11 +344,6 @@ export default function App() {
                   </div>
                 )}
 
-                {/* What the move cost, stated in the one unit that matters.
-                    Without this the driver has moved a stop and has no way to
-                    tell whether it was a good idea. */}
-                {beforeShift && <ShiftCost before={beforeShift} after={trip} />}
-
                 {/* Side by side: the timeline is a long list, and stacking it
                     under the map pushed the log sheets far below the fold. */}
                 <div className="results">
@@ -442,8 +351,6 @@ export default function App() {
                   <Timeline
                     timeline={trip.timeline}
                     cycleUsedAtStart={trip.summary.cycle_used_at_start}
-                    onShift={handleShift}
-                    shifting={shifting}
                   />
                 </div>
 

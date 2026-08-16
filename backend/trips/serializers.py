@@ -9,15 +9,13 @@ from __future__ import annotations
 from rest_framework import serializers
 
 from hos.logsheet import build_log_sheets
-from hos.planner import FORCED_STOP_MARKER
 from hos.rules import BREAK_MINUTES, DutyStatus
 from hos.state import DutyEvent as EngineEvent
-from routing.facilities import DEFAULT_LOOKBACK_MILES
 from routing.geometry import cumulative_miles, point_at_fraction, simplify
 from routing.trucks import STANDARD_DRY_VAN
 
 from .models import Trip
-from .stops import PARKABLE_KINDS, stop_kind as _stop_kind
+from .stops import stop_kind as _stop_kind
 
 
 def _latitude():
@@ -84,17 +82,6 @@ class TripInputSerializer(serializers.Serializer):
         return attrs
 
 
-class ForcedStopSerializer(serializers.Serializer):
-    """One stop the driver wants moved earlier."""
-
-    route_miles = serializers.FloatField(min_value=0)
-    kind = serializers.ChoiceField(choices=sorted(PARKABLE_KINDS))
-
-
-class ReplanSerializer(serializers.Serializer):
-    forced_stops = ForcedStopSerializer(many=True, allow_empty=False)
-
-
 def _to_engine_events(trip: Trip) -> list[EngineEvent]:
     return [
         EngineEvent(
@@ -107,10 +94,6 @@ def _to_engine_events(trip: Trip) -> list[EngineEvent]:
         )
         for event in trip.events.all()
     ]
-
-
-#: Candidates offered under one stop. Five is as many as a driver will read.
-MAX_FACILITIES_PER_STOP = 5
 
 
 class TripSerializer(serializers.ModelSerializer):
@@ -132,8 +115,6 @@ class TripSerializer(serializers.ModelSerializer):
             "summary",
             "timeline",
             "daily_logs",
-            "forced_stops",
-            "replanned_from",
         ]
 
     # -- Cached derivations --------------------------------------------------
@@ -286,18 +267,6 @@ class TripSerializer(serializers.ModelSerializer):
                     "satisfies_break": (
                         not driving and event.minutes >= BREAK_MINUTES and kind != "break"
                     ),
-                    # The driver put this one here, not the regulation. Without
-                    # it the timeline shows a moved rest identically to an
-                    # automatic one, and the whole point of moving it is lost.
-                    "moved_by_driver": FORCED_STOP_MARKER in event.note,
-                    # Where the driver could actually put the truck. Empty for
-                    # driving legs, for the shipper and receiver (both real
-                    # addresses), and whenever Overpass had nothing or was down.
-                    "facilities": (
-                        _facilities_before(trip.facilities, travelled)
-                        if kind in PARKABLE_KINDS
-                        else []
-                    ),
                 }
             )
         return timeline
@@ -331,26 +300,6 @@ class TripSerializer(serializers.ModelSerializer):
             }
             for sheet in self._sheets(trip)
         ]
-
-
-def _facilities_before(facilities: list[dict], stop_miles: float) -> list[dict]:
-    """Stopping places within reach of a stop, nearest to it first.
-
-    Strictly at or before the marker. A facility further along the route would
-    mean driving past the clock that forced the stop, so it is not an option
-    however convenient it looks -- see the note in ``routing.facilities``.
-
-    Each carries how far *before* the stop it sits, because that is the number
-    the driver is actually trading: stop 24 miles early and the whole remaining
-    plan shifts by that much.
-    """
-    within = [
-        {**facility, "miles_before_stop": round(stop_miles - facility["route_miles"], 1)}
-        for facility in facilities or []
-        if 0 <= stop_miles - facility["route_miles"] <= DEFAULT_LOOKBACK_MILES
-    ]
-    within.sort(key=lambda facility: facility["miles_before_stop"])
-    return within[:MAX_FACILITIES_PER_STOP]
 
 
 def _cycle_after_last_restart(events: list[EngineEvent]) -> float:

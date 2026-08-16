@@ -7,8 +7,7 @@ from datetime import datetime
 
 from django.db import transaction
 
-from hos.planner import ForcedStop, Leg, plan_trip
-from hos.rules import DutyStatus
+from hos.planner import Leg, plan_trip
 from routing.client import (
     SNAP_NOTICE_METRES,
     GeocodingError,
@@ -19,12 +18,10 @@ from routing.client import (
     route,
     snap_to_road,
 )
-from routing.facilities import find_along
 
 from .models import DutyEvent, Trip
-from .stops import PARKABLE_KINDS, stop_kind
 
-__all__ = ["GeocodingError", "ReplanUnavailable", "build_trip", "replan_trip"]
+__all__ = ["GeocodingError", "build_trip"]
 
 
 @transaction.atomic
@@ -116,10 +113,6 @@ def build_trip(
             {"miles": to_pickup.miles, "minutes": to_pickup.duration_minutes},
             {"miles": to_dropoff.miles, "minutes": to_dropoff.duration_minutes},
         ],
-        facilities=[
-            facility.as_dict()
-            for facility in find_along(geometry, _parkable_miles(events), total_miles)
-        ],
         distances_estimated=to_pickup.is_estimate or to_dropoff.is_estimate,
         # Both legs, not either: a trip is only truck-legal end to end if every
         # leg of it was routed for a truck.
@@ -130,86 +123,6 @@ def build_trip(
 
     _store_events(trip, events)
     return trip
-
-
-class ReplanUnavailable(ValueError):
-    """This trip cannot be re-planned, and retrying will not change that."""
-
-
-@transaction.atomic
-def replan_trip(trip: Trip, forced_stops: list[dict]) -> Trip:
-    """Re-plan an existing trip with one or more stops moved earlier.
-
-    Produces a **new** Trip rather than mutating the old one, so the driver can
-    compare what moving the stop cost them. The route itself is reused wholesale
-    -- same places, same geometry, same facilities, same leg distances -- which
-    means this makes no network calls at all and is therefore both fast and
-    incapable of returning different mileage than the plan it is compared with.
-    """
-    if not trip.legs:
-        raise ReplanUnavailable(
-            "This trip was planned before re-planning existed, so its per-leg "
-            "distances were not recorded. Plan it again to move its stops."
-        )
-
-    stops = [
-        ForcedStop(route_miles=float(stop["route_miles"]), kind=stop["kind"])
-        for stop in forced_stops
-    ]
-
-    events = plan_trip(
-        legs=[
-            Leg(
-                origin_label=trip.current_label,
-                dest_label=trip.pickup_label,
-                miles=trip.legs[0]["miles"],
-                duration_minutes=trip.legs[0]["minutes"],
-            ),
-            Leg(
-                origin_label=trip.pickup_label,
-                dest_label=trip.dropoff_label,
-                miles=trip.legs[1]["miles"],
-                duration_minutes=trip.legs[1]["minutes"],
-            ),
-        ],
-        start_time=trip.start_time,
-        carried_in_minutes=round(float(trip.current_cycle_used) * 60),
-        forced_stops=stops,
-    )
-
-    replan = Trip.objects.create(
-        current_location=trip.current_location,
-        pickup_location=trip.pickup_location,
-        dropoff_location=trip.dropoff_location,
-        current_cycle_used=trip.current_cycle_used,
-        start_time=trip.start_time,
-        current_label=trip.current_label,
-        pickup_label=trip.pickup_label,
-        dropoff_label=trip.dropoff_label,
-        current_lat=trip.current_lat,
-        current_lon=trip.current_lon,
-        pickup_lat=trip.pickup_lat,
-        pickup_lon=trip.pickup_lon,
-        dropoff_lat=trip.dropoff_lat,
-        dropoff_lon=trip.dropoff_lon,
-        total_distance_miles=trip.total_distance_miles,
-        total_duration_minutes=trip.total_duration_minutes,
-        route_geometry=trip.route_geometry,
-        legs=trip.legs,
-        # Carried over rather than looked up again: the parking options are a
-        # property of the route, which has not changed.
-        facilities=trip.facilities,
-        forced_stops=forced_stops,
-        replanned_from=trip,
-        # Same waypoints, so the same pins were moved to reach them.
-        snapped_waypoints=trip.snapped_waypoints,
-        distances_estimated=trip.distances_estimated,
-        truck_routed=trip.truck_routed,
-        no_road_route=trip.no_road_route,
-    )
-
-    _store_events(replan, events)
-    return replan
 
 
 def _store_events(trip: Trip, events) -> None:
@@ -226,23 +139,6 @@ def _store_events(trip: Trip, events) -> None:
         )
         for index, event in enumerate(events)
     )
-
-
-def _parkable_miles(events) -> list[float]:
-    """Route mile marker of every stop the driver has to park the truck for.
-
-    A stop happens where the driving stopped, so its marker is the miles covered
-    so far -- the same quantity the serializer interpolates map positions from,
-    derived the same way so the two cannot disagree about where a rest happened.
-    """
-    markers: list[float] = []
-    travelled = 0.0
-    for event in events:
-        if event.status is DutyStatus.DRIVING:
-            travelled += event.miles
-        elif stop_kind(event.status.value, event.note) in PARKABLE_KINDS:
-            markers.append(travelled)
-    return markers
 
 
 def _snap_all(*waypoints: tuple[str, Place]) -> tuple:

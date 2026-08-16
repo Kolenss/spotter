@@ -13,12 +13,11 @@ from routing.client import search as search_places
 
 from .models import Trip
 from .serializers import (
-    ReplanSerializer,
     TripInputSerializer,
     TripListSerializer,
     TripSerializer,
 )
-from .services import GeocodingError, ReplanUnavailable, build_trip, replan_trip
+from .services import GeocodingError, build_trip
 
 logger = logging.getLogger(__name__)
 
@@ -84,33 +83,6 @@ def trip_detail(request, pk: int):
         return Response({"detail": "Trip not found."}, status=status.HTTP_404_NOT_FOUND)
 
     return Response(TripSerializer(trip, context={"request": request}).data)
-
-
-@api_view(["POST"])
-def trip_replan(request, pk: int):
-    """Re-plan a trip with one or more stops moved earlier.
-
-    Creates a new trip rather than editing this one, so both plans survive and
-    the driver can see what the change cost. Makes no network calls: the route,
-    its geometry and its parking options are all reused from the original.
-    """
-    try:
-        trip = Trip.objects.prefetch_related("events").get(pk=pk)
-    except Trip.DoesNotExist:
-        return Response({"detail": "Trip not found."}, status=status.HTTP_404_NOT_FOUND)
-
-    form = ReplanSerializer(data=request.data)
-    form.is_valid(raise_exception=True)
-
-    try:
-        replan = replan_trip(trip, form.validated_data["forced_stops"])
-    except ReplanUnavailable as exc:
-        # Actionable by the driver -- they can simply plan the trip again -- so
-        # this is a 400 with the reason, not a 500.
-        return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-
-    payload = TripSerializer(replan, context={"request": request}).data
-    return Response(payload, status=status.HTTP_201_CREATED)
 
 
 @api_view(["GET"])

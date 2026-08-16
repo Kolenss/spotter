@@ -45,39 +45,12 @@ class Trip(models.Model):
     total_duration_minutes = models.IntegerField(default=0)
 
     #: Per-leg [{"miles": .., "minutes": ..}] for current->pickup and
-    #: pickup->dropoff. Stored so a re-plan can rebuild the exact same legs
-    #: without calling the routing service again: re-routing would cost two
-    #: network round trips and could quietly return different mileage, which
-    #: would make the before/after comparison meaningless.
+    #: pickup->dropoff. The totals above are the sum of these; keeping the
+    #: split means a leg's own mileage is recoverable without re-routing.
     legs = models.JSONField(default=list, blank=True)
 
-    #: Stops the driver moved earlier than the rules demanded, as
-    #: [{"route_miles": .., "kind": ..}]. Empty for a plan nobody has adjusted.
-    forced_stops = models.JSONField(default=list, blank=True)
-
-    #: The plan this one was produced from by moving a stop. Both survive, so
-    #: the driver can compare what the change cost.
-    replanned_from = models.ForeignKey(
-        "self",
-        null=True,
-        blank=True,
-        on_delete=models.SET_NULL,
-        related_name="replans",
-    )
-
-    #: GeoJSON coordinate pairs for the whole route. Persisted but unused until
-    #: the map ships; storing it now means that is a frontend-only change.
+    #: GeoJSON coordinate pairs for the whole route.
     route_geometry = models.JSONField(default=list, blank=True)
-
-    #: Truck stops, rest areas and truck-legal fuel found near the required
-    #: stops, as returned by Overpass at the time the trip was planned.
-    #:
-    #: Persisted rather than derived, unlike the log sheets. A log sheet is a
-    #: pure function of the duty events, so recomputing it can only ever agree
-    #: with them; this is a snapshot of somebody else's database, so re-fetching
-    #: it would silently change an old trip and cost an external call on every
-    #: read of every trip.
-    facilities = models.JSONField(default=list, blank=True)
 
     #: True whenever distances came from the haversine fallback rather than a
     #: road route, for either reason below.

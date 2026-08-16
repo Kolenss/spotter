@@ -60,48 +60,10 @@ class Leg:
         return self.miles / (self.duration_minutes / 60.0)
 
 
-@dataclass(frozen=True)
-class ForcedStop:
-    """A stop the driver has chosen to take earlier than the rules demand.
-
-    The engine is greedy: it drives until a clock binds. That is optimal for
-    arrival time and frequently useless in practice, because the mile marker it
-    picks may have nowhere to park. This lets a driver say "I am stopping at
-    mile 560 instead, because that is where the truck stop is" and see what the
-    rest of the trip costs as a result.
-
-    Taking a stop *early* can never make a plan illegal -- the clocks it
-    restores are restored sooner, and every mandatory check still runs on every
-    iteration afterwards. That asymmetry is why only earlier is offered.
-    """
-
-    #: Miles from the start of the whole trip, not from the start of a leg.
-    route_miles: float
-    #: One of "reset", "restart", "break", "fuel".
-    kind: str
-
-
-#: Appended to a forced stop's note. Defined once here and read back by the API
-#: so the timeline can mark which stops the driver chose, rather than two places
-#: independently pattern-matching the same English.
-FORCED_STOP_MARKER = "moved earlier by the driver"
-
-#: How a forced stop is logged, and the state change it causes. The notes must
-#: stay recognisable to ``trips.stops.stop_kind``, which reads them back to
-#: colour the timeline -- hence "10-hour", "34-hour", "30-minute break", "Fuel".
-_FORCED_STOPS = {
-    "reset": (RESET_MINUTES, DutyStatus.SLEEPER_BERTH, "10-hour reset"),
-    "restart": (RESTART_MINUTES, DutyStatus.SLEEPER_BERTH, "34-hour restart"),
-    "break": (BREAK_MINUTES, DutyStatus.OFF_DUTY, "30-minute break"),
-    "fuel": (FUEL_MINUTES, DutyStatus.ON_DUTY, "Fuel stop"),
-}
-
-
 def plan_trip(
     legs: Sequence[Leg],
     start_time: datetime,
     carried_in_minutes: int = 0,
-    forced_stops: Sequence[ForcedStop] = (),
 ) -> list[DutyEvent]:
     """Simulate the trip and return its contiguous duty-status timeline.
 
@@ -109,24 +71,12 @@ def plan_trip(
     inserted after the first leg and the 1-hour dropoff after the last, both as
     on-duty-not-driving time.
 
-    ``forced_stops`` are stops the driver moved earlier, addressed in miles from
-    the start of the trip. They are taken *in addition to* whatever the rules
-    require -- the mandatory checks are unchanged and still run first, so a
-    forced stop can delay an arrival but can never produce an illegal plan.
     """
     state = DriverState(clock=start_time, carried_in_minutes=carried_in_minutes)
     events: list[DutyEvent] = []
 
-    # Sorted and consumed front to back, so the loop only ever looks at the next
-    # one rather than rescanning the list on every iteration.
-    pending = sorted(
-        (stop for stop in forced_stops if stop.route_miles > MILE_EPSILON),
-        key=lambda stop: stop.route_miles,
-    )
-    miles_done = 0.0
-
     for index, leg in enumerate(legs):
-        miles_done = _drive_leg(state, events, leg, miles_done, pending)
+        _drive_leg(state, events, leg)
 
         if index == 0 and len(legs) > 1:
             _on_duty(state, events, PICKUP_MINUTES, leg.dest_label, "Pickup")
@@ -143,16 +93,8 @@ def _drive_leg(
     state: DriverState,
     events: list[DutyEvent],
     leg: Leg,
-    miles_done: float = 0.0,
-    pending: list[ForcedStop] | None = None,
-) -> float:
-    """Drive one leg to its end, inserting stops as clocks bind.
-
-    ``miles_done`` is the distance covered on earlier legs, and the return value
-    is the total after this one. Forced stops are addressed in whole-route
-    miles, so the loop has to know where it is on the *trip*, not just on the
-    leg.
-    """
+) -> None:
+    """Drive one leg to its end, inserting stops as clocks bind."""
     mph = leg.speed_mph()
     remaining = leg.miles
     iterations = 0
@@ -162,7 +104,6 @@ def _drive_leg(
         if iterations > MAX_ITERATIONS:  # pragma: no cover - safety valve
             raise RuntimeError(f"planner failed to converge on leg {leg!r}")
 
-        covered = miles_done + (leg.miles - remaining)
         here = _enroute_label(leg, leg.miles - remaining)
 
         # 1. The 70-hour cycle is spent: only a 34-hour restart frees it.
@@ -203,14 +144,6 @@ def _drive_leg(
             _fuel(state, events, here)
             continue
 
-        # 5. A stop the driver moved earlier. Checked last, after every
-        #    mandatory rule: if the cycle is exhausted the driver must restart
-        #    whatever they chose, and a forced stop should never be able to
-        #    displace a requirement.
-        if pending and covered >= pending[0].route_miles - MILE_EPSILON:
-            _forced(state, events, pending.pop(0), here)
-            continue
-
         minutes_for_rest_of_leg = math.ceil(remaining / mph * 60)
         budget = min(
             state.driving_remaining(),
@@ -218,7 +151,6 @@ def _drive_leg(
             state.break_remaining(),
             state.cycle_remaining(),
             minutes_until_fuel,
-            _minutes_until_forced(pending, covered, mph),
             minutes_for_rest_of_leg,
         )
         budget = max(1, budget)
@@ -238,51 +170,6 @@ def _drive_leg(
             miles=chunk_miles,
         )
         remaining -= chunk_miles
-
-    return miles_done + leg.miles
-
-
-def _minutes_until_forced(
-    pending: list[ForcedStop] | None, covered: float, mph: float
-) -> int:
-    """Minutes of driving left before the next forced stop is due.
-
-    Returned as part of the budget ``min()`` so the driver stops *at* the
-    chosen mile marker rather than overshooting it and backtracking -- the same
-    way the fuel interval is handled.
-    """
-    if not pending:
-        return MAX_ITERATIONS  # effectively unbounded; some other clock binds
-    return max(1, math.ceil((pending[0].route_miles - covered) / mph * 60))
-
-
-def _forced(
-    state: DriverState, events: list[DutyEvent], stop: ForcedStop, location: str
-) -> None:
-    """Log a stop the driver moved earlier, and apply its effect on the clocks.
-
-    The effect is identical to the rule-driven version -- an early 10-hour rest
-    restores the 11 and 14 exactly as a late one does. Only the note differs,
-    so the timeline can say why this stop is here.
-    """
-    minutes, status, label = _FORCED_STOPS[stop.kind]
-    _advance(
-        state,
-        events,
-        minutes,
-        status,
-        location,
-        f"{label} ({FORCED_STOP_MARKER})",
-    )
-
-    if stop.kind == "restart":
-        state.apply_restart()
-    elif stop.kind == "reset":
-        state.apply_reset()
-    elif stop.kind == "fuel":
-        state.miles_since_fuel = 0.0
-    # A break needs no explicit call: _advance already zeroes driving_since_break
-    # for any non-driving block of 30+ minutes, which is the actual rule.
 
 
 def _enroute_label(leg: Leg, miles_done: float) -> str:

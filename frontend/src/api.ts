@@ -1,5 +1,4 @@
 import type {
-  ForcedStop,
   PlaceSuggestion,
   Trip,
   TripListItem,
@@ -165,43 +164,6 @@ export async function loadTrip(id: number): Promise<Trip> {
   }
 
   return (await response.json()) as Trip;
-}
-
-/**
- * Re-plan a trip with a stop moved earlier.
- *
- * Returns a new trip rather than editing this one, so the caller can hold both
- * and show what the change cost.
- */
-export async function replanTrip(
-  id: number,
-  forcedStops: ForcedStop[],
-): Promise<Trip> {
-  let response: Response;
-  try {
-    response = await fetch(`${BASE_URL}/trips/${id}/replan/`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ forced_stops: forcedStops }),
-    });
-  } catch {
-    throw new ApiError(
-      "Could not reach the planning service. Check that the backend is running.",
-    );
-  }
-
-  if (response.ok) {
-    return (await response.json()) as Trip;
-  }
-
-  let detail = `Could not move the stop (HTTP ${response.status}).`;
-  try {
-    const payload = await response.json();
-    if (typeof payload?.detail === "string") detail = payload.detail;
-  } catch {
-    /* keep the status-code message */
-  }
-  throw new ApiError(detail);
 }
 
 export async function planTrip(request: TripRequest): Promise<Trip> {

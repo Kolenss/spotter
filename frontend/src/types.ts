@@ -1,19 +1,5 @@
 export type DutyStatus = "off_duty" | "sleeper_berth" | "driving" | "on_duty";
 
-/**
- * The kinds of place a driver can put a truck, as `routing/facilities.py`
- * classifies them. Kept in step with `_TAG_QUERIES` and `_KIND_FALLBACK_NAME`
- * there -- the server decides the kind, this only has to name it.
- */
-export type TruckStopKind = "truck_stop" | "rest_area" | "fuel" | "parking";
-
-export const TRUCK_STOP_LABEL: Record<TruckStopKind, string> = {
-  truck_stop: "Services",
-  rest_area: "Rest area",
-  fuel: "Truck fuel",
-  parking: "Truck parking",
-};
-
 export type StopKind =
   | "driving"
   | "pickup"
@@ -86,28 +72,6 @@ export interface TripSummary {
   ends_at: string | null;
 }
 
-/**
- * Somewhere the driver could legally put the truck, near a forced stop.
- *
- * Uses `TruckStopKind` and `TRUCK_STOP_LABEL` above rather than declaring a
- * second set of names for the same four things — the anti-drift rule the
- * duty-status colours and STOP_LABEL already follow.
- */
-export interface Facility {
-  osm_id: string;
-  kind: TruckStopKind;
-  name: string;
-  lat: number;
-  lon: number;
-  /** Position along the route, in the same road miles the engine counts in. */
-  route_miles: number;
-  /** How far off the route it sits. */
-  detour_miles: number;
-  /** How much earlier than planned stopping here would be. Never negative. */
-  miles_before_stop: number;
-  amenities: string[];
-}
-
 /** One entry in the trip timeline — a driving leg or a stop. */
 export interface TimelineEntry {
   kind: StopKind;
@@ -123,11 +87,6 @@ export interface TimelineEntry {
   lon: number | null;
   /** A 30+ minute non-driving block also satisfies the required break. */
   satisfies_break: boolean;
-  /** The driver moved this stop earlier; the regulation did not put it here. */
-  moved_by_driver: boolean;
-  /** Places to park, at or before this stop. Empty for driving legs, for the
-   *  shipper and receiver, and whenever Overpass had nothing or was down. */
-  facilities: Facility[];
 }
 
 export interface LogSegment {
@@ -156,13 +115,6 @@ export interface DailyLog {
   remarks: LogRemark[];
 }
 
-/** A stop the driver moved earlier than the rules demanded. */
-export interface ForcedStop {
-  /** Miles from the start of the trip, not from the start of a leg. */
-  route_miles: number;
-  kind: "reset" | "restart" | "break" | "fuel";
-}
-
 export interface Trip {
   id: number;
   created_at: string;
@@ -171,10 +123,6 @@ export interface Trip {
   summary: TripSummary;
   timeline: TimelineEntry[];
   daily_logs: DailyLog[];
-  /** Empty for a plan nobody has adjusted. */
-  forced_stops: ForcedStop[];
-  /** The plan this was produced from by moving a stop, if any. */
-  replanned_from: number | null;
 }
 
 /** The three locations, as keyed in the request and on the picker map. */
