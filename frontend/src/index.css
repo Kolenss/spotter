@@ -867,6 +867,19 @@ h3 {
   color: var(--ink-soft);
 }
 
+/* Inline in the sentence that explains the failure, so the offer to retry sits
+   where the reason is rather than as a detached button. */
+.history__retry {
+  padding: 0;
+  font: inherit;
+  font-weight: 650;
+  color: var(--accent-dark);
+  background: none;
+  border: 0;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
 .history__day + .history__day {
   margin-top: 14px;
 }

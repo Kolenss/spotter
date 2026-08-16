@@ -7,6 +7,8 @@ on whatever the road network happens to return today.
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 import pytest
 
 from routing.client import GeocodingError, Place, RouteLeg
@@ -697,3 +699,58 @@ def test_a_failed_snap_leaves_the_trip_exactly_as_it_was(client, monkeypatch):
 
     assert response.status_code == 201
     assert response.json()["route"]["snapped_waypoints"] == []
+
+
+# -- History ordering --------------------------------------------------------
+
+
+def _make_trip(**overrides) -> Trip:
+    """A stored trip, straight to the model -- these tests are about the order
+    rows come back in, not about planning them."""
+    fields = {
+        "current_location": "A",
+        "pickup_location": "B",
+        "dropoff_location": "C",
+        "current_cycle_used": 0,
+        "start_time": "2026-08-13T06:00:00",
+        "total_distance_miles": 10,
+        "total_duration_minutes": 60,
+    }
+    fields.update(overrides)
+    return Trip.objects.create(**fields)
+
+
+
+def test_history_is_ordered_by_insert_not_by_clock(client):
+    """The regression that hid a driver's newest trips.
+
+    ``created_at`` is ``auto_now_add`` under ``USE_TZ = False``, so each writer
+    stamps its own system wall clock. A local machine and the deployed service
+    sharing one database differ by whole hours, which put a *newer* row behind
+    an older one -- and behind the limit, where History never showed it. Insert
+    order cannot be skewed by a clock.
+    """
+    first = _make_trip(dropoff_label="oldest")
+    second = _make_trip(dropoff_label="newest")
+
+    # The deployed service's clock, hours behind the one that wrote `first`.
+    Trip.objects.filter(pk=second.pk).update(
+        created_at=first.created_at - timedelta(hours=8)
+    )
+
+    ids = [row["id"] for row in client.get("/api/trips/").json()]
+
+    assert ids == [second.pk, first.pk], "the newest trip must come first"
+
+
+
+def test_history_limit_is_clamped_and_survives_nonsense(client):
+    """A bad ``limit`` takes the default rather than 400ing: History is a
+    convenience panel, not an input to a plan."""
+    for _ in range(3):
+        _make_trip()
+
+    assert len(client.get("/api/trips/?limit=2").json()) == 2
+    assert len(client.get("/api/trips/?limit=0").json()) == 1, "clamped to 1"
+    assert len(client.get("/api/trips/?limit=banana").json()) == 3, "default"
+    assert len(client.get("/api/trips/?limit=9999").json()) == 3, "capped, not an error"

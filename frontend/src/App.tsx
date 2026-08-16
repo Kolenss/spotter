@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   ApiError,
   listTrips,
+  loadHistory,
   loadTrip,
   planTrip,
   replanTrip,
@@ -98,9 +99,26 @@ export default function App() {
   const [beforeShift, setBeforeShift] = useState<Trip | null>(null);
   const [shifting, setShifting] = useState(false);
 
-  useEffect(() => {
-    listTrips().then(setHistory);
+  /* The one request that has to survive a cold start: it fires on first paint,
+     which is exactly when a free-tier service is most likely to be asleep. */
+  const [historyWaking, setHistoryWaking] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+
+  const refreshHistory = useCallback(() => {
+    setHistoryError(null);
+    loadHistory(() => setHistoryWaking(true))
+      .then((trips) => setHistory(trips))
+      .catch((caught) =>
+        setHistoryError(
+          caught instanceof ApiError
+            ? caught.message
+            : "Previous trips could not be loaded.",
+        ),
+      )
+      .finally(() => setHistoryWaking(false));
   }, []);
+
+  useEffect(refreshHistory, [refreshHistory]);
 
   /* Owned here rather than in either child: the form and the picker map sit in
      different columns, and both read and write these. */
@@ -324,6 +342,9 @@ export default function App() {
                 trips={history}
                 activeId={trip?.id ?? null}
                 onOpen={handleOpenTrip}
+                waking={historyWaking}
+                error={historyError}
+                onRetry={refreshHistory}
               />
             </div>
           </div>

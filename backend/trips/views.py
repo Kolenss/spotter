@@ -31,11 +31,35 @@ PLACE_SUGGESTION_LIMIT = 5
 #: than a town name needs.
 PIN_PRECISION_DP = 5
 
+#: How many trips History returns, and the ceiling a caller may ask for.
+HISTORY_DEFAULT_LIMIT = 50
+HISTORY_MAX_LIMIT = 200
+
+
+def _history_limit(request) -> int:
+    """How many rows to return, clamped. A bad ``limit`` takes the default
+    rather than 400ing: this is a convenience panel, not an input to a plan."""
+    raw = request.query_params.get("limit")
+    if raw is None:
+        return HISTORY_DEFAULT_LIMIT
+    try:
+        return max(1, min(int(raw), HISTORY_MAX_LIMIT))
+    except ValueError:
+        return HISTORY_DEFAULT_LIMIT
+
 
 @api_view(["GET", "POST"])
 def trip_collection(request):
     if request.method == "GET":
-        trips = Trip.objects.all()[:25]
+        # `-id`, not the model's default `-created_at`. `created_at` is
+        # `auto_now_add` under USE_TZ=False, so every writer stamps its own
+        # system wall clock -- and when a local machine and the deployed
+        # service share one database their clocks differ by whole hours. Rows
+        # then sort into the wrong order, and with a hard limit the newest trip
+        # can fall outside the window entirely and never appear in History at
+        # all. The primary key is the insert order by definition and no clock
+        # can skew it.
+        trips = Trip.objects.order_by("-id")[: _history_limit(request)]
         return Response(TripListSerializer(trips, many=True).data)
 
     form = TripInputSerializer(data=request.data)

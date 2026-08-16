@@ -36,9 +36,23 @@ interface Props {
   /** The trip currently shown, so the list can mark where you are. */
   activeId: number | null;
   onOpen: (id: number) => void;
+  /** The first load is still retrying through a cold start. */
+  waking?: boolean;
+  /** The first load gave up. Distinct from "no trips": one is a server that
+   *  could not be reached, the other is a database with nothing in it, and
+   *  showing the empty copy for both is what made a nap look like data loss. */
+  error?: string | null;
+  onRetry?: () => void;
 }
 
-export function TripHistory({ trips, activeId, onOpen }: Props) {
+export function TripHistory({
+  trips,
+  activeId,
+  onOpen,
+  waking = false,
+  error = null,
+  onRetry,
+}: Props) {
   const groups = groupByDay(trips);
 
   return (
@@ -52,7 +66,21 @@ export function TripHistory({ trips, activeId, onOpen }: Props) {
         )}
       </div>
       <div className="card__body history">
-        {groups.length === 0 ? (
+        {groups.length === 0 && waking ? (
+          <p className="history__empty" role="status">
+            Waking the planning service&hellip; it sleeps after 15 minutes idle
+            on the free tier, so the first request can take up to a minute.
+          </p>
+        ) : groups.length === 0 && error ? (
+          <p className="history__empty" role="status">
+            {error}{" "}
+            {onRetry && (
+              <button type="button" className="history__retry" onClick={onRetry}>
+                Try again
+              </button>
+            )}
+          </p>
+        ) : groups.length === 0 ? (
           <p className="history__empty">
             Trips you plan are saved here so you can reopen their log sheets.
           </p>
